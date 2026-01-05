@@ -1,0 +1,563 @@
+{
+    "common": {
+      "count": 134,
+      "agents": {
+        "Acidic Ooze": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Acolyte of Brell": { "count": 0 },
+        "Advocate of Brell": { "count": 0 },
+        "Ak`Anon Architect": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Ak`Anon Engineer": { "count": 0 },
+        "Ak`Anon Guard": { "count": 0 },
+        "Amygdalan Knight": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Bandit Lookout": { "count": 0 },
+        "Barbed Bone Skeleton": { "count": 0 },
+        "Blazing Elemental": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Blighted Scarecrow": { "count": 0 },
+        "Blood Wolf": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Boogeyman": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Captive Elemental": { "count": 0 },
+        "Cargo Clockwork": { "count": 0 },
+        "Cauldron Cliffdiver": { "count": 0 },
+        "Cauldron Merchant": { "count": 0 },
+        "Cauldron Rat": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Cocoa Vendor": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Coral Carver": { "count": 0 },
+        "Crypt Ghoul": { "count": 0 },
+        "Crystallos Stone Trader": { "count": 0 },
+        "Dark Reflection Poisoner": { "count": 0 },
+        "Darkvine Entrancer": { "count": 0 },
+        "Darkvine Shadereaper": { "count": 0 },
+        "Darkvine Thistle": { "count": 0 },
+        "Deathly Harbinger": { "count": 0 },
+        "Deathspore Decomposer": { "count": 0 },
+        "Deep Muse Healer": { "count": 0 },
+        "Diabolical Alchemist": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Drangol Cook": { "count": 0 },
+        "Dwarven Blacksmith": { "count": 0 },
+        "Dwarven Lorekeeper": { "count": 0 },
+        "Dwarven Theologist": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Dwarven Trinket Seller": { "count": 0 },
+        "Elder Spirit Guide": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Eldritch Wanderer": { "count": 0 },
+        "Emissary of Crystallos": { "count": 0 },
+        "Enraged Dwarf Skeleton": { "count": 0 },
+        "Faerie Courtier": { "count": 0 },
+        "Faerie Guard": { "count": 0 },
+        "Faerie Royal Guard": { "count": 0 },
+        "Faerie Troublemaker": { "count": 0 },
+        "Fallen Noble": { "count": 0 },
+        "Faydark Bandit": { "count": 0 },
+        "Faydark Nightgazer": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Feir`Dal Salvager": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Felwithe Guard": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Felwithe Songwhisperer": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Felwithe Sunweaver": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Firstlight Refugee": { "count": 0 },
+        "Forest Gatherer": { "count": 0 },
+        "Forlorn Specter": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Free Diving Limnologist": { "count": 0 },
+        "Frostfell Goblin": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Glacier Bear": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Gnoll Refugee": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Goblin Grunts": { "count": 0 },
+        "Goblin Mapmaker": { "count": 0 },
+        "Guardian of the Keep": { "count": 0 },
+        "Ice Drake": { "count": 0 },
+        "Ice Elementalist": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Ice Giant": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Ice Goblin Hoarder": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Ice Goblin Whelp": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Impetuous Rover": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Inquisitive Wanderer": { "count": 0 },
+        "Junk Dealer": { "count": 0 },
+        "Kaladim Guard": { "count": 0 },
+        "Kelethin Guard": { "count": 0 },
+        "Kelethin Herbalist": { "count": 0 },
+        "Kelethin Lorist": { "count": 0 },
+        "Kirathas Druid": { "count": 0 },
+        "Kirathas Villager": { "count": 0 },
+        "Koada`Dal Alchemist": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Koada`Dal Counselor": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Koada`Dal Diviner": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Magma Giant": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Magmite": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Masked Changeling": { "count": 0 },
+        "Nightrage Decapitator": { "count": 0 },
+        "Nightrage Narcissist": { "count": 0 },
+        "Nightwalker Scavenger": { "count": 0 },
+        "Orc Emissary": { "count": 0 },
+        "Orc Legionnaire": { "count": 0 },
+        "Orc Scoutmaster": { "count": 0 },
+        "Orc Slavers": { "count": 0 },
+        "Phantasm": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Pixie Jongleur": { "count": 0 },
+        "Pixie Trickster": { "count": 0 },
+        "Rock Spider": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Rogue Clockwork": { "count": 0 },
+        "Scavenge Diver": { "count": 0 },
+        "Scion Grave Scourer": { "count": 0 },
+        "Seeker of Ro": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Servant of the Ancients": { "count": 0 },
+        "Shadowmane Brawler": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Shadowy Scrivener": { "count": 0 },
+        "Siege Specialist": { "count": 0 },
+        "Sleeper`s Acolyte": { "count": 0 },
+        "Sneering Gargoyle": { "count": 0 },
+        "Soldier of Fire": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Solusek Fighter": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Solusek Priest": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Solusek Sage": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Soul Seductress": { "count": 0 },
+        "Steam Trader": { "count": 0 },
+        "Steam Zealot": { "count": 0 },
+        "Steamwork Hunter": { "count": 0 },
+        "Steamwork Mender": { "count": 0 },
+        "Steamwork Shock Trooper": { "count": 0 },
+        "Sylvan Bat": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Sylvan Pilgrim": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Teir`Dal Marauder": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Terrified Thief": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Tormented Dead": { "count": 0 },
+        "Trapped Soul": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Treasure Seeker": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Trueborn Embalmer": { "count": 0 },
+        "Tunarian Scout": { "count": 0 },
+        "Tundra Trapper": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Undead Barkeep": { "count": 0 },
+        "Undead Knight": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Undertow Skeleton": { "count": 0 },
+        "Undying Magus": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Unrest Noble": { "count": 0 },
+        "Vicious Worg": { "count": 0 },
+        "Wandering Greenblood": { "count": 0 },
+        "Wandering Minstrel": { "count": 0 },
+        "Wandering Tinkerer": { "count": 0 },
+        "Wandering Witch": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Wasp Worker": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Weary Traveler": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Werewolf Gypsy": { "count": 0 }
+      }
+    },
+    "uncommon": {
+      "count": 76,
+      "agents": {
+        "Avenging Caitiff": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Black Dire": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Cloaked Dhampyre": { "count": 0 },
+        "Cursed Remnant": { "count": 0 },
+        "Cursed Treant": { "count": 0 },
+        "Dancing Skeleton": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Dark Elf Courier": { "count": 0 },
+        "Deathly Usher": { "count": 0 },
+        "Disciple of Tunare": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Dryad Tender": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Elder Fire Drake": { "count": 0 },
+        "Elder Ice Drake": { "count": 0 },
+        "Exiled Legionnaire": { "count": 0 },
+        "Felwithe Armorer": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Glyphed Ghoul": { "count": 0 },
+        "Golden Haired Mermaid": { "count": 0 },
+        "Imp Familiar": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Kaladim Brewmaster": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Kaladim Surveyor": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Koada`Dal Noble": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Minotaur Lord": { "count": 0 },
+        "Mistmoore Advisor": { "count": 0 },
+        "Orc Arsonist": { "count": 0 },
+        "Orc Chief": { "count": 0 },
+        "Orc Taskmaster": { "count": 0 },
+        "Orc Trainer": { "count": 0 },
+        "Orc Warlord": { "count": 0 },
+        "Priest of Discord": { "count": 0 },
+        "Priest of Najena": { "count": 0 },
+        "Reclusive Ghoul Magus": { "count": 0 },
+        "Shadowman Leader": { "count": 0 },
+        "Shadowmane Warrior": { "count": 0 },
+        "Stalking Fury": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Teir`Dal Prophet": { "count": 0 },
+        "Trapped Elemental": { "count": 0 },
+        "Warden of Tunare": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Weapons Trader": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Amber": { "count": 0 },
+        "Banker Rylisan": { "count": 0 },
+        "Bilge Farfathom": { "count": 0 },
+        "Captain Silverwind": { "count": 0 },
+        "Challice": { "count": 0 },
+        "Char the Brunt": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Clockwork VIIX": { "count": 0 },
+        "Commander Gearwell": { "count": 0 },
+        "Conium Darkblade": { "count": 0 },
+        "Corflunk": { "count": 0 },
+        "Dwigus Lowater": { "count": 0 },
+        "Elia the Pure": { "count": 0 },
+        "Ennixy Frennor": { "count": 0 },
+        "Equestrielle": { "count": 0 },
+        "Estrella of Gloomwater": { "count": 0 },
+        "Farios Elianos": { "count": 0 },
+        "Forpar Fizfla": { "count": 0 },
+        "Guard Orcflayer": { "count": 0 },
+        "Head Administrator Grigano": { "count": 0 },
+        "Kimble Nogflop": { "count": 0 },
+        "Lanika Shadestepper": { "count": 0 },
+        "Magus Tira": { "count": 0 },
+        "Maukris": { "count": 0 },
+        "Nybright Sisters": { "count": 0 },
+        "Overseer Gakkor Deepscar": { "count": 0 },
+        "Peg Leg": { "count": 0 },
+        "Retlon Brenclog": { "count": 0 },
+        "Serra": { "count": 0 },
+        "Signus Boran": { "count": 0 },
+        "Sister Donna": { "count": 0 },
+        "Ssynthi": { "count": 0 },
+        "Tandan Nybright": { "count": 0 },
+        "The Prophet": { "count": 0 },
+        "Thistle Underbrush": { "count": 0 },
+        "Tumpy Irontoe": { "count": 0 },
+        "Usbak the Old": { "count": 0 },
+        "Xam": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Zarchoomi": { "count": 0 },
+        "Zigan Ribshard": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        }
+      }
+    },
+    "rare": {
+      "count": 39,
+      "agents": {
+        "Anitohk the Everliving": { "count": 0 },
+        "Barrith the Brave": { "count": 0 },
+        "Bimbalicus the Soulbleeder": { "count": 0 },
+        "Butler Syncall": { "count": 0 },
+        "Carlene Snizzlefriz": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Cavalier Devolah": { "count": 0 },
+        "Cikdew the Wicked": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Dabner Drednever": { "count": 0 },
+        "Enynti": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Founy Jestands": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Galeth Veredeth": { "count": 0 },
+        "Garanel Rucksif": { "count": 0 },
+        "Gearheart": { "count": 0 },
+        "General Jyleel": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Joren Nobleheart": { "count": 0 },
+        "Juline Urncaller": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Lady Chiasa": { "count": 0 },
+        "Lord Nethryn the Arbitrato": { "count": 0 },
+        "Lorisyn Oakwynd": { "count": 0 },
+        "Lyirae Oakwynd": { "count": 0 },
+        "Maid Issis": { "count": 0 },
+        "Maesyn Trueshot": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Niola Impholder": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Nitalla": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Nylianne the True": { "count": 0 },
+        "Nyzil Bloodforge": { "count": 0 },
+        "Ognit Eznertob": { "count": 0 },
+        "Overvolt Rigster the IV": { "count": 0 },
+        "Princess Joleena": { "count": 0 },
+        "Reaver Lebanezer": { "count": 0 },
+        "Shifty Jenkins": { "count": 0 },
+        "Sister Daria": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Sylia Windlehands": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "The Collector": { "count": 0 },
+        "The Grinnuch": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        },
+        "Thubr Axebringer": { "count": 0 },
+        "Tobon Starpyre": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Yeolarn Bronzeleaf": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Xicotl": {
+          "source": "July 2021 Patch",
+          "count": 0
+        }
+      }
+    },
+    "elite": {
+      "count": 21,
+      "agents": {
+        "Ambassador D`Vinn": { "count": 0 },
+        "Avatar of Anashti Sul": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Avatar of Brell": { "count": 0 },
+        "Avatar of Bristlebane": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Avatar of Cazic Thule": {
+          "source": "2022 Nights of the Dead",
+          "count": 0
+        },
+        "Avatar of Luclin": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Avatar of Quellious": {
+          "source": "July 2021 Patch",
+          "count": "20"
+        },
+        "Avatar of Solusek Ro": {
+          "source": "June 2022 Scorched Sky",
+          "count": 0
+        },
+        "Avatar of Tunare": { "count": 0 },
+        "Avatar of Xegony": {
+          "source": "July 2021 Patch",
+          "count": 0
+        },
+        "Emperor Crush": { "count": 0 },
+        "Fippy Darkpaw": {
+          "source": "Overseer Starter Bundle ",
+          "count": 0
+        },
+        "Firiona Vie": { "count": 0 },
+        "First Ranger Kele": { "count": 0 },
+        "King Kazon Stormhammer": { "count": 0 },
+        "King Tearis Thex": { "count": 0 },
+        "Marcia Attamilgad": { "count": 0 },
+        "Mayong Mistmoore": { "count": 0 },
+        "Meldrath The Malignant": { "count": 0 },
+        "Phinigel Autropos": { "count": 0 },
+        "Santug Claugg": {
+          "source": "November 2022 Frostfell",
+          "count": 0
+        }
+      }
+    },
+    "count": 270
+  }
