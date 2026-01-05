@@ -1,0 +1,28 @@
+{
+  "achievements": [
+    {
+      "id": 45000014,
+      "name": "Feast of Giving: Quests"
+    },
+    {
+      "id": 44920000,
+      "name": "Frostfell: Quests"
+    },
+    {
+      "id": 44820000,
+      "name": "Nights of the Dead: Quests"
+    },
+    {
+      "id": 44720000,
+      "name": "Scorched Sky: Quests"
+    },
+    {
+      "id": 45000007,
+      "name": "Stone Cold Summer: Quests"
+    },
+    {
+      "id": 45000000,
+      "name": "Tempest Festival: Quests"
+    }
+  ]
+}
