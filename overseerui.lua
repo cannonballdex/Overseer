@@ -10,6 +10,8 @@ local tests = require('overseer.tests.string_utils_tests')
 local string_utils = require('overseer/utils/string_utils')
 local utils = require('utils.utils')
 local icons = require('mq.Icons')
+local claims_section_open = true
+local pending_window_size = nil
 
 local actions = {}
 
@@ -43,6 +45,13 @@ end
 
 function DrawMainWindow()
     if MyShowUi == false then return end
+
+    -- Apply a pending window size change (if requested by a UI interaction)
+    if pending_window_size ~= nil then
+        -- SetNextWindowSize must be called BEFORE Begin to affect the window.
+        ImGui.SetNextWindowSize(pending_window_size.width, pending_window_size.height)
+        -- keep pending_window_size so the window stays at this size until changed again
+    end
 
     local changed
     MyShowUi, ShowUI = ImGui.Begin('Overseer', Open)
@@ -210,31 +219,44 @@ function RenderGeneralTab()
         local ornamentation = mq.TLO.FindItemCount('=Overseer Ornamentation Dispenser')()
         local collectionDispenser = mq.TLO.FindItemCount('=Overseer Collection Item Dispenser')()
         local agent = mq.TLO.FindItemCount('=Overseer Agent Pack')()
-        local coffer = mq.TLO.FindItemCount('=Sealed Tetradrachm Coffer')()
         local agentElite = mq.TLO.FindItemCount('=Elite Agent Echo')()
         local agentUncommon = mq.TLO.FindItemCount('=Overseer Bonus Uncommon Agent')()
-        local tetradrachms = mq.TLO.Me.AltCurrency('Overseer Tetradrachms')()
 
         ImGui.Separator()
-        if ImGui.CollapsingHeader('Overseer Claims (Inventory)') then
-            local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
-            if ImGui.BeginTable('##tableClaims', 3, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
-                ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 0)
-                ImGui.TableSetupColumn('Value', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 1)
-                ImGui.TableSetupColumn('Padding', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 1)
+        -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
+local was_claims_open = claims_section_open
+local is_claims_open = ImGui.CollapsingHeader('Overseer Claims (Inventory)')
+claims_section_open = is_claims_open
 
-                add_claim_table_row('Overseer Tetradrachms', tetradrachms)
-                add_claim_table_row('Dispenser Fragments', fragments)
-                add_claim_table_row('Ornamentation Dispensers', ornamentation)
-                add_claim_table_row('Collection Item Dispensers', collectionDispenser)
-                add_claim_table_row('Agent Packs', agent)
-                add_claim_table_row('Sealed Tetradrachm Coffer', coffer)
-                add_claim_table_row('Uncommon Agent Packs', agentUncommon)
-                add_claim_table_row('Elite Agent Echos', agentElite)
+-- If the user just collapsed the section, shrink the whole window.
+-- If they just expanded it, restore a larger window.
+if (not is_claims_open and was_claims_open) then
+    -- user collapsed → minimize window. Adjust numbers to taste:
+    pending_window_size = { width = 300, height = 225 }
+elseif (is_claims_open and not was_claims_open) then
+    -- user expanded → restore to a larger size. Adjust to your preferred default:
+    pending_window_size = { width = 300, height = 375 }
+end
 
-                ImGui.EndTable()
-            end
-        end
+if is_claims_open then
+    local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
+    if ImGui.BeginTable('##tableClaims', 2, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
+        ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+            -1.0, 0)
+        ImGui.TableSetupColumn('Value', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+            -1.0, 1)
+        
+        add_claim_table_row('Overseer Tetradrachms', mq.TLO.Me.OverseerTetradrachm())
+        add_claim_table_row('Dispenser Fragments', fragments)
+        add_claim_table_row('Ornamentation Dispensers', ornamentation)
+        add_claim_table_row('Collection Item Dispensers', collectionDispenser)
+        add_claim_table_row('Agent Packs', agent)
+        add_claim_table_row('Uncommon Agent Packs', agentUncommon)
+        add_claim_table_row('Elite Agent Echos', agentElite)
+
+        ImGui.EndTable()
+    end
+end
 
         ImGui.EndTabItem()
     end
@@ -343,10 +365,6 @@ function RenderSettingsGeneralTab()
 
             if Settings.General.agentCountForConversionCommon < 2 then Settings.General.agentCountForConversionCommon = 1 end
             if (changed) then settings.SaveSettings() end
-            ImGui.SameLine()
-            if ImGui.Button'Mass Convert Common' then
-                mq.cmdf('/overseermassconvert common %s', Settings.General.agentCountForConversionCommon)
-            end
 
             ImGui.PushItemWidth(100)
             Settings.General.agentCountForConversionUncommon, changed = ImGui.InputInt("Uncommon",
@@ -354,11 +372,6 @@ function RenderSettingsGeneralTab()
             uiutils.add_tooltip('Specifies number of uncommon agents to maintain\n\nCommand: conversionCountUncommon #')
             if Settings.General.agentCountForConversionUncommon < 2 then Settings.General.agentCountForConversionUncommon = 1 end
             if (changed) then settings.SaveSettings() end
-            ImGui.SameLine()
-            local uncommon = Settings.General.agentCountForConversionUncommon
-            if ImGui.Button'Mass Convert Uncommon' then
-                mq.cmdf('/overseermassconvert uncommon %s', uncommon)
-            end
 
             ImGui.PushItemWidth(100)
             Settings.General.agentCountForConversionRare, changed = ImGui.InputInt("Rare",
@@ -366,10 +379,6 @@ function RenderSettingsGeneralTab()
             uiutils.add_tooltip('Specifies number of rare agents to maintain\n\nCommand: conversionCountRare #')
             if Settings.General.agentCountForConversionRare < 2 then Settings.General.agentCountForConversionRare = 1 end
             if (changed) then settings.SaveSettings() end
-            ImGui.SameLine()
-            if ImGui.Button'Mass Convert Rare' then
-                mq.cmdf('/overseermassconvert rare %s', Settings.General.agentCountForConversionRare)
-            end
 
             if (Settings.General.convertEliteAgents) then
                 ImGui.PushItemWidth(100)
@@ -378,43 +387,29 @@ function RenderSettingsGeneralTab()
                 uiutils.add_tooltip('Specifies number of elite agents to maintain\n\nCommand: conversionCountElite #')
                 if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
                 if (changed) then settings.SaveSettings() end
-                ImGui.SameLine()
-            if ImGui.Button'Mass Convert Elite' then
-                mq.cmdf('/overseermassconvert elite %s', Settings.General.agentCountForConversionElite)
-            end
                 ImGui.Unindent(20)
             end
         end
 
         ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, "Quest Mode")
-        ImGui.Separator()
-        ImGui.Indent(20)
-        ImGui.Text(" Not Implemented ")
-        ImGui.Unindent(20)
-        ImGui.Separator()
-
-        -- Settings.General.rewards.maximizeStoredExpRewards, changed = uiutils.add_setting_checkbox('Save Highest Exp Quests/Rewards',
-        -- Settings.General.rewards.maximizeStoredExpRewards,
-        -- 'If selected, highest exp quests will be run, and highest exp rewards will be saved\n\nCommand: saveMaxExpRewards')
-        -- if (changed) then settings.SaveSettings() end
-
-        -- ImGui.Indent(20)
-        -- ImGui.PushItemWidth(100)
-        -- Settings.General.rewards.storedExpRewardsCount, changed = ImGui.InputInt("Number of rewards to bank", Settings.General.rewards.storedExpRewardsCount, 1, 10, ImGuiInputTextFlags.EnterReturnsTrue)
-        -- if Settings.General.rewards.storedExpRewardsCount < 1 then Settings.General.rewards.storedExpRewardsCount = 1 end
-        -- if Settings.General.rewards.storedExpRewardsCount > 10 then Settings.General.rewards.storedExpRewardsCount = 10 end
-        -- uiutils.add_tooltip('If MaximizeStoredExpRewards option selected, specifies number of rewards to maintain in the reward window before claiming.')
-        -- if (changed) then settings.SaveSettings() end
-        -- ImGui.PopItemWidth()
-        -- ImGui.Unindent(20)
+        
         uiutils.text_colored(TextStyle.ItemValue, "Reward Claim")
         ImGui.Separator()
 
         if Settings.General.maxLevelForClaimingExpReward ~= nil then
-            Settings.General.maxLevelUseCurrentCap, changed = uiutils.add_setting_checkbox('Use Current Character Level Cap: '..mq.TLO.Me.MaxLevel(), Settings.General.maxLevelUseCurrentCap,
-            'Always claim exp up to current character level cap.')
-            if (changed) then settings.SaveSettings() end
+            Settings.General.maxLevelUseCurrentCap, changed = uiutils.add_setting_checkbox(
+            'Use Current Character Level Cap: ' .. mq.TLO.Me.MaxLevel(),
+            Settings.General.maxLevelUseCurrentCap,
+            'Always claim exp up to current character level cap.'
+            )
+
+            if (changed) then
+                -- If user enabled "use current cap", copy the current runtime cap into the stored setting
+                if (Settings.General.maxLevelUseCurrentCap) then
+                    Settings.General.maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel()
+                end
+                settings.SaveSettings()
+            end
 
             if (Settings.General.maxLevelUseCurrentCap) then
                 ImGui.Indent(20)
@@ -524,8 +519,7 @@ local all_rewards = {
     "Torment of Velious",
     "Claws of Veeshan",
     "Terror of Luclin",
-    "Night of Shadows",
-    "Laurion's Song"
+    "Night of Shadows"
 }
 
 local active_item_current_idx = 0
@@ -590,7 +584,7 @@ function RenderSettingsRewardsGeneralSection()
         'Claim any agent packs automatically, after each full cycle.\n\nCommand: claimAgentPacks')
     if (changed) then settings.SaveSettings() end
 
-    Settings.General.claimTetradrachmPacks, changed = uiutils.add_setting_checkbox('Claim Tetradrachm Coffer',
+    Settings.General.claimTetradrachmPacks, changed = uiutils.add_setting_checkbox('Claim Tetradrachm Packs',
         Settings.General.claimTetradrachmPacks,
         'Claim any Tetradrachm packs automatically, after each full cycle.\n\nCommand: claimTetradrachm')
     if (changed) then settings.SaveSettings() end
@@ -914,30 +908,33 @@ function RenderSettingsSpecificQuestSection()
         uiutils.text_colored(TextStyle.ItemValueDetail, 'Active Achievement Quests')
 
         local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
-if ImGui.BeginTable('##achievementQuests', 3, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
-    ImGui.TableSetupColumn('Run', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 0)
-    ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 1)
-    ImGui.TableSetupColumn('Status', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 1)
+        if ImGui.BeginTable('##achievementQuests', 3, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
+            ImGui.TableSetupColumn('Run', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0,
+                0)
+            ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0,
+                1)
+            ImGui.TableSetupColumn('Status', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 1)
 
-    for name, achievement_quest in pairs(Settings.AchievementQuests) do
-        ImGui.TableNextRow()
-        ImGui.TableNextColumn()
+            for name, achievement_quest in pairs(Settings.AchievementQuests) do
+                ImGui.TableNextRow()
+                ImGui.TableNextColumn()
 
-        achievement_quest.run, changed = uiutils.add_setting_checkbox("##ach_run" .. achievement_quest.id,
-            achievement_quest.run, 'Run quests associated with this achievement.')
-        if (changed) then settings.SaveSettings() end
+                achievement_quest.run, changed = uiutils.add_setting_checkbox("##ach_run" .. achievement_quest.id,
+                    achievement_quest.run, 'Run quests associated with this achievement.')
+                if (changed) then settings.SaveSettings() end
 
-        ImGui.TableNextColumn()
-        uiutils.text_colored(TextStyle.ItemValue, name)
+                ImGui.TableNextColumn()
+                uiutils.text_colored(TextStyle.ItemValue, name)
 
-        ImGui.TableNextColumn()
-        local actual_achievement = mq.TLO.Achievement.Achievement(achievement_quest.id)
-        local status, format = GetAchievementQuestStatusDetails(actual_achievement)
-        uiutils.text_colored(format, status)
-    end
+                ImGui.TableNextColumn()
+                local actual_achievement = mq.TLO.Achievement.Achievement(achievement_quest.id)
+                local status, format = GetAchievementQuestStatusDetails(actual_achievement)
+                uiutils.text_colored(format, status)
+            end
 
-    ImGui.EndTable()
-end
+            ImGui.EndTable()
+        end
 
 
         ImGui.Separator()
@@ -1104,11 +1101,14 @@ function RenderStatsTab()
 
         local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
         if ImGui.BeginTable('##table2', 4, flags, 0, TEXT_BASE_HEIGHT * 5, 0.0) then
-            ImGui.TableSetupColumn('Type', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, column_types.type)
-            ImGui.TableSetupColumn('Available', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, column_types.available)
-            ImGui.TableSetupColumn('Have', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, column_types.have)
-            ImGui.TableSetupColumn('Duplicates', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, column_types.duplicates)
-
+            ImGui.TableSetupColumn('Type', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0,
+                column_types.type)
+            ImGui.TableSetupColumn('Available', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, column_types.available)
+            ImGui.TableSetupColumn('Have', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0,
+                column_types.have)
+            ImGui.TableSetupColumn('Duplicates',
+                bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthFixed), -1.0, column_types.duplicates)
             ImGui.TableNextRow()
             ImGui.TableNextColumn()
             uiutils.text_colored(TextStyle.TableColHeader, 'Type')
@@ -1177,34 +1177,36 @@ function RenderSpecificAgentCountSection(name, showType)
     if (filterComboVisible == false) then
         ImGui.PushItemWidth(100)
         agent_show_type, _ = ImGui.Combo('Filter', agent_show_type, 'All\0Have\0Missing\0')
+
         filterComboVisible = true
     end
-
-    local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
-
+    local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter,
+        ImGuiTableFlags.BordersInBody)
     if ImGui.CollapsingHeader(string.format('%s Agents', name)) then
         if ImGui.BeginTable('##tableEliteAgentCounts', 5, flags, 0, TEXT_BASE_HEIGHT * 5, 0.0) then
             -- Declare columns
-            ImGui.TableSetupColumn('Agent', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 0)
-            ImGui.TableSetupColumn('Count', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 1)
-            ImGui.TableSetupColumn('Source', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 3)
-            ImGui.TableSetupColumn('Retire', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 2)
-            ImGui.TableSetupColumn('Padding', bit32.bor(ImGuiTableColumnFlags.NoSort), -1.0, 4)
-
+            ImGui.TableSetupColumn('Agent', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 0)
+            ImGui.TableSetupColumn('Count', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 1)
+            ImGui.TableSetupColumn('Source', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 3)
+            ImGui.TableSetupColumn('Retire', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 2)
+            ImGui.TableSetupColumn('Padding', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                -1.0, 4)
             ImGui.TableNextRow()
             ImGui.TableNextColumn()
             uiutils.text_colored(TextStyle.TableColHeader, 'Agent')
             ImGui.TableNextColumn()
             uiutils.text_colored(TextStyle.TableColHeader, 'Count')
             ImGui.TableNextColumn()
-
             -- TODO: Elite Retire
             if (is_elite(rarity)) then
                 uiutils.text_colored(TextStyle.TableColHeader, 'Retire')
             else
                 ImGui.Text('                 ')
             end
-
             ImGui.TableNextColumn()
             uiutils.text_colored(TextStyle.TableColHeader, 'Source')
             ImGui.TableNextColumn()
@@ -1223,9 +1225,7 @@ function RenderSpecificAgentCountSection(name, showType)
                     else
                         ImGui.Text(value.count)
                     end
-
                     ImGui.TableNextColumn()
-
                     -- TODO: Elite Retire
                     if (is_elite(rarity) and value.count > 1) then
                         uiutils.add_action_button(string.format('Retire##retire%s', item), 'RetireEliteAgent',
@@ -1233,7 +1233,6 @@ function RenderSpecificAgentCountSection(name, showType)
                     else
                         ImGui.Text('                 ')
                     end
-
                     ImGui.TableNextColumn()
                     if (value.source ~= nil) then
                         ImGui.Text(value.source)
@@ -1246,85 +1245,107 @@ function RenderSpecificAgentCountSection(name, showType)
     end
 end
 
-
-
 function RenderTestTab()
-    if not ImGui.BeginTabItem("Test") then return end
-
-    -- Timing controls
-    local function HandleInputInt(label, current, min, max, callback)
-        local value, changed = ImGui.InputInt(label, current, min, max, ImGuiInputTextFlags.EnterReturnsTrue)
-        if changed then
-            print(label..": "..value)
-            callback(value)
+    if ImGui.BeginTabItem("Test") then
+        local minutes, changed = ImGui.InputInt("Min Til Next Quest", MinutesUntilNextQuest, 1, 120,
+            ImGuiInputTextFlags.EnterReturnsTrue)
+        if (changed) then
+            printf("Minutes: %s", minutes)
+            MinutesUntilNextQuest = minutes
+            overseer.PostProcessNextRunTimes()
         end
-    end
 
-    HandleInputInt("Min Til Next Quest", MinutesUntilNextQuest, 1, 120, function(v)
-        MinutesUntilNextQuest = v
-        overseer.PostProcessNextRunTimes()
-    end)
+        local seconds, changed = ImGui.InputInt("Sec Til Next Rotation", SecondsUntilNextRotation, 1, 120,
+            ImGuiInputTextFlags.EnterReturnsTrue)
+        if (changed) then
+            printf("Seconds: %s", seconds)
+            overseer.SetQuestRotationTimeSeconds(seconds)
+        end
 
-    HandleInputInt("Sec Til Next Rotation", SecondsUntilNextRotation, 1, 120, overseer.SetQuestRotationTimeSeconds)
+        local level, changed = ImGui.InputInt("Char Level", mqFacade.GetCharLevel(), 1, 120,
+            ImGuiInputTextFlags.EnterReturnsTrue)
+        if (changed) then
+            printf("Level: %s", level)
+            mqFacade.SetCharLevel(level)
+        end
 
-    -- Character controls
-    HandleInputInt("Char Level", mqFacade.GetCharLevel(), 1, 120, mqFacade.SetCharLevel)
+        local name, changed = ImGui.InputText("Char Name", mqFacade.GetCharNameAndClass(),
+            ImGuiInputTextFlags.EnterReturnsTrue)
+        if (changed) then
+            printf("Name: %s", name)
+            mqFacade.SetCharName(name)
+        end
 
-    local name, changed = ImGui.InputText("Char Name", mqFacade.GetCharNameAndClass(), ImGuiInputTextFlags.EnterReturnsTrue)
-    if changed then
-        print("Name: "..name)
-        mqFacade.SetCharName(name)
-    end
+        -- local resultvar = uiutils.draw_combo_box("##GameState", mqFacade.GetGameState(), game_states, false)
+        -- if (resultvar ~= nil) then
+        --     mqFacade.SetGameState(resultvar)
+        -- end
 
-    -- State selection dropdowns
-    local function RenderCombo(label, current, items, setter)
-        if not ImGui.BeginCombo(label, current) then return end
-        for k, v in pairs(items) do
-            if ImGui.Selectable(v, v == current) then
-                setter(v)
+        local bykey = false
+        local resultvar = nil
+        if ImGui.BeginCombo("Game State", mqFacade.GetGameState()) then
+            for i, j in pairs(game_states) do
+                if bykey then
+                    if ImGui.Selectable(i, i == resultvar) then
+                        resultvar = i
+                    end
+                else
+                    if ImGui.Selectable(j, j == resultvar) then
+                        resultvar = j
+                    end
+                end
             end
+            if (resultvar ~= nil) then
+                mqFacade.SetGameState(resultvar)
+            end
+            ImGui.EndCombo()
         end
-        ImGui.EndCombo()
+
+        resultvar = nil
+        if ImGui.BeginCombo("Subscription Level", mqFacade.GetSubscriptionLevel()) then
+            for i, j in pairs(subscription_levels) do
+                if bykey then
+                    if ImGui.Selectable(i, i == resultvar) then
+                        resultvar = i
+                    end
+                else
+                    if ImGui.Selectable(j, j == resultvar) then
+                        resultvar = j
+                    end
+                end
+            end
+            if (resultvar ~= nil) then
+                mqFacade.SetSubscriptionLevel(resultvar)
+            end
+            ImGui.EndCombo()
+        end
+
+        ImGui.Separator()
+
+        if (ImGui.Button('Run Unit Tests')) then
+            tests.RunTests()
+        end
+
+        if (ImGui.Button('Sample Log Output')) then
+            logger.output_test_logs()
+        end
+
+        ImGui.Separator()
+        uiutils.text_colored(TextStyle.SubSectionTitleCallout, "Database")
+        Settings.General.useQuestDatabase, changed = uiutils.add_setting_checkbox('Load known quests from database.',
+            Settings.General.useQuestDatabase,
+            'If selected, quests will be loaded from database rather than parsing from the overseer UI.\n\nCommand: useDatabase')
+        if (changed) then settings.SaveSettings() end
+        Settings.Debug.processFullQuestRewardData, changed = uiutils.add_setting_checkbox("Add Quests to Database",
+            Settings.Debug.processFullQuestRewardData, 'Adds new quests to the local database.\n\nCommand: addToDatabase')
+        if (changed) then settings.SaveSettings() end
+        Settings.Debug.validateQuestRewardData, changed = uiutils.add_setting_checkbox("Validate Quest Reward Data",
+            Settings.Debug.validateQuestRewardData, 'Validates current quest exp matches stored exp.\n\nCommand: addToDatabase \n\nNOTE: Full System Walk (Takes a while)\nErrors are only logged to output window.')
+        if (changed) then settings.SaveSettings() end
+        ImGui.Separator()
+
+        ImGui.EndTabItem()
     end
-
-    RenderCombo("Game State", mqFacade.GetGameState(), game_states, mqFacade.SetGameState)
-    RenderCombo("Subscription Level", mqFacade.GetSubscriptionLevel(), subscription_levels, mqFacade.SetSubscriptionLevel)
-
-    -- Buttons section
-    ImGui.Separator()
-    if ImGui.Button('Run Unit Tests') then tests.RunTests() end
-    if ImGui.Button('Sample Log Output') then logger.output_test_logs() end
-
-    -- Database settings
-    ImGui.Separator()
-    uiutils.text_colored(TextStyle.SubSectionTitleCallout, "Database")
-
-    local function HandleSettingCheckbox(label, value, tooltip)
-        local changed
-        value, changed = uiutils.add_setting_checkbox(label, value, tooltip)
-        if changed then settings.SaveSettings() end
-        return value
-    end
-
-    Settings.General.useQuestDatabase = HandleSettingCheckbox(
-        'Load known quests from database.',
-        Settings.General.useQuestDatabase,
-        'If selected, quests will be loaded from database rather than parsing from the overseer UI.\n\nCommand: useDatabase'
-    )
-
-    Settings.Debug.processFullQuestRewardData = HandleSettingCheckbox(
-        "Add Quests to Database",
-        Settings.Debug.processFullQuestRewardData,
-        'Adds new quests to the local database.\n\nCommand: addToDatabase'
-    )
-
-    Settings.Debug.validateQuestRewardData = HandleSettingCheckbox(
-        "Validate Quest Reward Data",
-        Settings.Debug.validateQuestRewardData,
-        'Validates current quest exp matches stored exp.\n\nCommand: addToDatabase\n\nNOTE: Full System Walk (Takes a while)\nErrors are only logged to output window.'
-    )
-
-    ImGui.EndTabItem()
 end
 
 return actions
