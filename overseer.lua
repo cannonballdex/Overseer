@@ -1,5 +1,5 @@
 -- ******************************************************
--- * Overseer.lua.  Version 3.0
+-- * Overseer.lua.  Version 5.0
 -- ******************************************************
 
 local mq = require('mq')
@@ -1224,7 +1224,7 @@ function LoadAvailableQuestsExtraData(quest_name)
 end
 
 function LoadAvailableQuests(loadExtraData)
-	if (AvailableQuestListLoaded == true) then
+	if AvailableQuestListLoaded then
 		return
 	end
 
@@ -1237,104 +1237,143 @@ function LoadAvailableQuests(loadExtraData)
 	AvailableQuestCount = 0
 	QuestRunOrder = 0
 
-	if (Settings.Debug.validateQuestRewardData) then
+	if Settings.Debug.validateQuestRewardData then
 		logger.warning('\ay In Quest Validation Mode. Rewards will be checked for each against database.')
 	end
 
-	::nextNodeX::
-	database_exp_amount = nil
+	while NODE do
+		if Aborting then return end
+		
+		database_exp_amount = nil
 
-	if Aborting then return end
-	if (NODE == nil or tostring(NODE) == "NULL" or tostring(NODE) == nil or AvailableQuestList == nil) then
-		logger.error("LoadAvailableQuests: Error on final.  Skipping away...")
-		return false
-	end
+		-- Validate NODE and children
+		if not NODE or tostring(NODE) == "NULL" or not AvailableQuestList then
+			logger.error("LoadAvailableQuests: Invalid node, ending quest load")
+			break
+		end
 
-	if NODE.Child == nil or NODE.Child('OW_BtnQuestTemplate')() == nil then
-		return
-	end
+		local questButton = NODE.Child('OW_BtnQuestTemplate')
+		if not questButton or not questButton() then
+			if NODE.Siblings() then
+				NODE = NODE.Next
+			else
+				break
+			end
+			goto continue
+		end
 
-	if NODE.Child == nil or NODE.Child('OW_BtnQuestTemplate').Text() == nil then
-		return
-	end
+		-- ✅ FIX: Always call Text() to get the actual string
+		local buttonText = questButton.Text()
+		
+		if not buttonText or buttonText == '' then
+			if NODE.Siblings() then
+				NODE = NODE.Next
+			else
+				break
+			end
+			goto continue
+		end
 
-	if NODE.Child('OW_BtnQuestTemplate').Text() ~= nil then
-		questName = NODE.Child('OW_BtnQuestTemplate').Text()
-	end
+		questName = buttonText  -- ✅ Now questName is definitely a string
 
-	if (string.find(questName, 'Conversion') and actions.TutorialIsRequired == false and DebugNoRunQuestMode == false) then
-		goto doneWithThisNode
-	end
+		-- Skip conversion quests unless in tutorial or debug mode
+		if string.find(questName, 'Conversion') and 
+		   not actions.TutorialIsRequired and 
+		   not DebugNoRunQuestMode then
+			if NODE.Siblings() then
+				NODE = NODE.Next
+			else
+				break
+			end
+			goto continue
+		end
 
-	AvailableQuestCount = AvailableQuestCount + 1
+		AvailableQuestCount = AvailableQuestCount + 1
 
-	if (Settings.General.useQuestDatabase == true) then
-		-- LOAD FROM DB.  i.e. "Do we already know about this one"
-		current_quest = db.GetQuestDetails(questName)
-		if (current_quest ~= nil) then
-			AllAvailableQuests[AvailableQuestCount] = current_quest
-			current_quest.available = true
-			database_exp_amount = current_quest.experience
+		-- Try to load from database first
+		if Settings.General.useQuestDatabase then
+			current_quest = db.GetQuestDetails(questName)
+			if current_quest then
+				AllAvailableQuests[AvailableQuestCount] = current_quest
+				current_quest.available = true
+				database_exp_amount = current_quest.experience
 
-			if (not Settings.Debug.validateQuestRewardData) then
-				goto doneWithThisNode
+				if not Settings.Debug.validateQuestRewardData then
+					if NODE.Siblings() then
+						NODE = NODE.Next
+					else
+						break
+					end
+					goto continue
+				end
 			end
 		end
-	end
 
-	SelectAvailableQuestNode(NODE)
+		-- Select node to read details
+		SelectAvailableQuestNode(NODE)
 
-	current_quest = AllAvailableQuests[AvailableQuestCount]
-	current_quest.available = true
-	current_quest.name = questName
-	current_quest.duration = mq.TLO.Window(AvailableQuestCompletionTime).Text()
+		current_quest = AllAvailableQuests[AvailableQuestCount]
+		current_quest.available = true
+		current_quest.name = questName
+		
+		-- ✅ FIX: Call Text() to get string
+		local durationWindow = mq.TLO.Window(AvailableQuestCompletionTime)
+		current_quest.duration = durationWindow and durationWindow.Text() or 'Unknown'
 
-	fullQuestDetailString = mq.TLO.Window(AvailableQuestDifficulty).Text()
+		-- ✅ FIX: Call Text() to get string
+		local difficultyWindow = mq.TLO.Window(AvailableQuestDifficulty)
+		fullQuestDetailString = difficultyWindow and difficultyWindow.Text() or ''
 
-	-- Have to do this as the official text has a leading space (' Conversion')
-	if (string.find(fullQuestDetailString, 'Conversion')) then
-		current_quest.type = 'Conversion'
-	else
-		local questLevel, questRarity, questType = fullQuestDetailString:match("Level (%d+) (%a+) (%a+)")
-		current_quest.level = questLevel
-		current_quest.rarity = questRarity
-		current_quest.type = questType
-	end
-
-	current_quest.experience = 0.0
-	current_quest.mercenaryAas = 0.0
-	current_quest.tetradrachms = 0
-
-	if (current_quest.type ~= 'Recruitment' and current_quest.type ~= 'Conversion' and current_quest.type ~= 'Recovery') then
-		if (Settings.Debug.processFullQuestRewardData == true or loadExtraData == true) then
-			LoadAvailableQuestsExtraData(current_quest.name)
-		elseif (Settings.General.rewards.maximizeStoredExpRewards == true) then
-			LoadAvailableQuestsExperience(current_quest.name)
+		-- Parse quest type
+		if string.find(fullQuestDetailString, 'Conversion') then
+			current_quest.type = 'Conversion'
+		else
+			local questLevel, questRarity, questType = fullQuestDetailString:match("Level (%d+) (%a+) (%a+)")
+			current_quest.level = questLevel
+			current_quest.rarity = questRarity
+			current_quest.type = questType
 		end
-	end
 
-	-- If we're in validation mode, log it (to screen) but do not save.
-	if (Settings.Debug.validateQuestRewardData and database_exp_amount ~= nil and database_exp_amount ~= current_quest.experience) then
-		logger.error('\ar EXP VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
-		logger.error('    \at Not updating database at all for this quest.')
-	elseif (database_exp_amount == nil and Settings.Debug.processFullQuestRewardData == true) then
-		db.UpdateQuestDetails(questName, current_quest)
-	end
+		current_quest.experience = 0.0
+		current_quest.mercenaryAas = 0.0
+		current_quest.tetradrachms = 0
 
-	::doneWithThisNode::
+		-- Load extra reward data if needed
+		if current_quest.type ~= 'Recruitment' and 
+		   current_quest.type ~= 'Conversion' and 
+		   current_quest.type ~= 'Recovery' then
+			if Settings.Debug.processFullQuestRewardData or loadExtraData then
+				LoadAvailableQuestsExtraData(current_quest.name)
+			elseif Settings.General.rewards.maximizeStoredExpRewards then
+				LoadAvailableQuestsExperience(current_quest.name)
+			end
+		end
 
-	if NODE.Siblings() == nil then
-		goto nextNodeX
-	else
-		if (NODE.Siblings()) then
+		-- Validate and possibly update database
+		if Settings.Debug.validateQuestRewardData and database_exp_amount and 
+		   database_exp_amount ~= current_quest.experience then
+			logger.error('\ar EXP VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', 
+				current_quest.name, database_exp_amount, current_quest.experience)
+			logger.error('    \at Not updating database at all for this quest.')
+		elseif not database_exp_amount and Settings.Debug.processFullQuestRewardData then
+			db.UpdateQuestDetails(questName, current_quest)
+		end
+
+		-- Move to next node
+		if NODE.Siblings() then
 			NODE = NODE.Next
-			goto nextNodeX
+		else
+			break
 		end
+
+		::continue::
 	end
 
+	-- Close reward window if open
 	if mq.TLO.Window('RewardSelectionWnd').Open() then
 		CloseRewardWindow()
 	end
+	
 	AvailableQuestListLoaded = true
 end
 
@@ -1639,27 +1678,32 @@ end
 
 -- Selects and attempts to populate/run the specified quest
 -- Returns true if quest was able to run due to existing, having appropriate agents, and passing rules; else false
+
 function ProcessGeneralQuest(index, rarity, duration, typeX, level)
 	if Aborting then return end
 
 	local questName = AllAvailableQuests[index].name
 
-	local result = FindQuest(questName)
-	if (result == false) then
+	local foundQuest = FindQuest(questName)
+	if not foundQuest then
 		logger.error('ProcessGeneralQuest: Expected quest not found ' .. questName)
 		return false
 	end
 
-	result = ProcessCurrentGeneralQuest(rarity, questName)
-	if (result == false) then return false end
+	-- ✅ FIX: Use a different variable name OR add type annotation
+	---@type boolean?
+	local questResult = ProcessCurrentGeneralQuest(rarity, questName)
+	if not questResult then return false end
 
-	-- Make sure to mark this quest as having been run
+	-- Mark quest as run
 	QuestRunOrder = QuestRunOrder + 1
 	AllAvailableQuests[index].available = false
 	AllAvailableQuests[index].runOrder = QuestRunOrder
-	AllAvailableQuests[index].successRate = mq.TLO.Window('OverseerWnd/OW_ALL_SuccessValue').Text()
+	
+	local successWindow = mq.TLO.Window('OverseerWnd/OW_ALL_SuccessValue')
+	AllAvailableQuests[index].successRate = successWindow and successWindow.Text() or '0%'
 
-	if (AreAtMaxQuests()) then return true end
+	if AreAtMaxQuests() then return true end
 
 	ChangeTab(1)
 
@@ -1673,106 +1717,128 @@ local function GetSuccessPercent()
 end
 
 function ProcessCurrentGeneralQuest(rarity, questName)
-	logger.info('Attempting to run ' .. questName)
-	FailedQuest_ResetMinionCache()
+    logger.info('Attempting to run ' .. questName)
+    FailedQuest_ResetMinionCache()
 
-	local result
-	::selectBestAgents::
-	if Aborting then return end
-	result = SelectBestAgents()
+    ::selectBestAgents::
+    if Aborting then return false end  -- ✅ Explicitly return false
 
-	-- If we didn't have proper agents to run, abort...
-	if (result == false) then
-		logger.info('Not enough appropriate agents to run quest.')
-		return false
-	end
+    local agentResult = SelectBestAgents()
+    if not agentResult then
+        logger.info('Not enough appropriate agents to run quest.')
+        return false
+    end
 
-	if (rarity ~= 'Recruit') then
-		if (DebugNoSelectAgents == true) then
-			logger.debug('Ignoring success rate of quests (due to Debug|doNotFindAgents)')
-		else
-			result = VerifySuccessRate(rarity, GetSuccessPercent())
-			if (result == false) then
-				logger.info('skipping quest \ay%s\ao. Success (\ay%s\ao) below accepted threshold for \ay%s\ao.', questName,
-					mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text(), rarity)
-				return false
-			end
-		end
-	else
-		logger.debug('Ignoring success rate of Recruit Quests (All allowed)')
-	end
+    if rarity ~= 'Recruit' then
+        if DebugNoSelectAgents then
+            logger.debug('Ignoring success rate of quests (due to Debug|doNotFindAgents)')
+        else
+            local successResult = VerifySuccessRate(rarity, GetSuccessPercent())
+            if not successResult then
+                logger.info('skipping quest \ay%s\ao. Success (\ay%s\ao) below accepted threshold for \ay%s\ao.', 
+                    questName, mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text(), rarity)
+                return false
+            end
+        end
+    else
+        logger.debug('Ignoring success rate of Recruit Quests (All allowed)')
+    end
 
-	logger.warning('  .....Starting quest \ay%s\ao with \ay%s\ao success.', questName, mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
+    logger.warning('  .....Starting quest \ay%s\ao with \ay%s\ao success.', questName, 
+        mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
 
-	if Aborting then return end
+    if Aborting then return false end  -- ✅ Explicitly return false
 
-	StartQuest()
-	mq.doevents()
-	mq.delay(500)
+    StartQuest()
+    mq.doevents()
+    mq.delay(500)
 
-	if (FailedQuest_InStartQuestBadAgentErrorMode) then
-		-- Start over fresh, just excluding others
-		FailedQuest_InStartQuestBadAgentErrorMode = false
-		FailedQuest_OutputFailedMinions()
-		FailedQuest_ClearAllAssignedMinions()
-		goto selectBestAgents
-	end
+    if FailedQuest_InStartQuestBadAgentErrorMode then
+        FailedQuest_InStartQuestBadAgentErrorMode = false
+        FailedQuest_OutputFailedMinions()
+        FailedQuest_ClearAllAssignedMinions()
+        goto selectBestAgents
+    end
 
-	return true
+    return true
 end
 
 function ProcessConversionQuest(priority)
-	-- TODO: Qualify which this should be - i.e. OverseerWnd/OW_OverseerQuestsPage/OW_ALLTitleLabel
-	local questName = mq.TLO.Window('OverseerWnd/OW_ALL_TitleLabel').Text()
-	local NODE = mq.TLO.Window(AvailableQuestMinions).FirstChild.Next
+    local questName = mq.TLO.Window('OverseerWnd/OW_ALL_TitleLabel').Text()
+    
+    local firstChild = mq.TLO.Window(AvailableQuestMinions).FirstChild
+    if not firstChild then
+        logger.error('No AvailableQuestMinions found')
+        return false
+    end
+    
+    local NODE = firstChild.Next
+    if not NODE then
+        logger.error('No second minion slot found')
+        return false
+    end
 
-	logger.debug('\aoProcessing Conversion \ay%s', questName)
-	FailedQuest_ResetMinionCache()
+    logger.debug('\aoProcessing Conversion \ay%s', questName)
+    FailedQuest_ResetMinionCache()
 
-	if (DebugNoRunQuestMode == true) then
-		MarkAvailableQuestAsRun(questName, mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
-		return false
-	end
+    if DebugNoRunQuestMode then
+        MarkAvailableQuestAsRun(questName, mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
+        return false
+    end
 
-	::nextAgent::
-	if Aborting then return false end
+    while NODE and not Aborting do
+        local selectBtn = NODE.Child('OW_ALL_MinionSelectBtn')
+        if not selectBtn then
+            logger.warning('No select button found for minion slot')
+            if NODE.Siblings() then
+                NODE = NODE.Next
+            else
+                break
+            end
+            goto continue
+        end
 
-	mqutils.action(NODE.Child('OW_ALL_MinionSelectBtn').LeftMouseUp)
-	mq.doevents()
-	mq.delay(1500)
+        mqutils.action(selectBtn.LeftMouseUp)
+        mq.doevents()
+        mq.delay(1500)
 
-	local result = SelectNextDuplicateAgent(priority)
-	if (result == false) then
-		logger.info('Not enough duplicate agents for \ay%s', questName)
-		return false
-	end
+        local result = SelectNextDuplicateAgent(priority)
+        if not result then
+            logger.info('Not enough duplicate agents for \ay%s', questName)
+            return false
+        end
 
-	if (NODE.Siblings() == nil) then
-		goto nextAgent
-	else
-		if (NODE.Siblings()) then
-			NODE = NODE.Next
-			goto nextAgent
-		end
-	end
+        -- Move to next sibling
+        if NODE.Siblings() then
+            NODE = NODE.Next
+        else
+            break
+        end
 
-	-- Our success wasn't updating in time.  Not the most important but guarantees we're seeing what we should.
-	mq.delay(1000)   -- TODO: Add condition
-	logger.warning('  .....Starting quest \ay%s\ao with \ay%s\ao success.', questName, mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
+        ::continue::
+    end
 
-	if Aborting then return false end
-	StartQuest()
-	if (FailedQuest_InStartQuestBadAgentErrorMode) then
-		-- Start over fresh, just excluding others
-		FailedQuest_InStartQuestBadAgentErrorMode = false
-		NODE = mq.TLO.Window(AvailableQuestMinions).FirstChild.Next
-		FailedQuest_OutputFailedMinions()
-		FailedQuest_ClearAllAssignedMinions()
-		goto nextAgent
-	end
+    if Aborting then return false end
 
-	ClaimConversionQuest(questName)
-	return true
+    -- Our success wasn't updating in time
+    mq.delay(1000)
+    logger.warning('  .....Starting quest \ay%s\ao with \ay%s\ao success.', questName, 
+        mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text())
+
+    StartQuest()
+    
+    if FailedQuest_InStartQuestBadAgentErrorMode then
+        -- Start over fresh, excluding problematic agents
+        FailedQuest_InStartQuestBadAgentErrorMode = false
+        FailedQuest_OutputFailedMinions()
+        FailedQuest_ClearAllAssignedMinions()
+        
+        -- Recursive retry with cleaned cache
+        return ProcessConversionQuest(priority)
+    end
+
+    ClaimConversionQuest(questName)
+    return true
 end
 
 function SelectNextDuplicateAgent(priority)
@@ -1904,115 +1970,154 @@ function ClaimConversionQuest(name)
 end
 
 function ClaimFastQuest()
-	local attempts = 0
-	local waitSeconds = 1000
-	local quest_name = mq.TLO.Window(CurrentQuestName).Text()
+    local max_attempts = 120  -- 2 minutes at 1 second per attempt
+    local attempts = 0
+    local wait_seconds = 1000
+    local quest_name = mq.TLO.Window(CurrentQuestName).Text()
 
-	::retryClaim::
-	if Aborting then return end
-	if (mq.TLO.Window('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton').Enabled() == false) then
-		if (attempts > 40) then
-			logger.error('Quest not complete: \ay%s\ao.  Still waiting but maybe check things yourself also.', quest_name)
-			attempts = 0
-			goto retryClaim
-		end
+    logger.debug('Waiting for quest to complete: \ay%s', quest_name)
 
-		attempts = attempts + 1
-		if (attempts > 11) then
-			logger.info('Waiting for quest to complete: \ay%s\ao...', quest_name)
-		end
+    while attempts < max_attempts do
+        if Aborting then return end
 
-		if Aborting then return end
-		mq.delay(waitSeconds)
-		goto retryClaim
-	end
+        local collectButton = mq.TLO.Window('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton')
+        if collectButton and collectButton.Enabled() then
+            logger.info('\ay%s\ao has succeeded. Claiming.', quest_name)
+            mqutils.leftmouseup('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton')
+            mq.doevents()
+            mq.delay(1000)
+            return true
+        end
 
-	logger.info('\ay%s\ao has succeeded.  Claiming.', quest_name)
-	mqutils.leftmouseup('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton')
+        attempts = attempts + 1
 
-	-- Wait until the quest has been removed from Active Quests tab, which can take a moment, else it's not back in Quests window
-	mq.doevents()
-	mq.delay(1000)  -- TODO: Add a "While Title ~= quest_name" kind of delay condition
+        -- Periodic status updates
+        if attempts % 10 == 0 then
+            logger.info('Still waiting for quest to complete: \ay%s\ao (%d/%d attempts)', 
+                quest_name, attempts, max_attempts)
+        end
+
+        if Aborting then return end
+        mq.delay(wait_seconds)
+    end
+
+    logger.error('Quest did not complete after %d attempts: \ay%s', max_attempts, quest_name)
+    return false
 end
 
 function SelectActiveQuest(name)
-	local NODE = mq.TLO.Window(ActiveQuestList).FirstChild
+    local NODE = mq.TLO.Window(ActiveQuestList).FirstChild
+    
+    while NODE do
+        local questButton = NODE.Child('OW_BtnQuestTemplate')
+        if not questButton then
+            if NODE.Siblings() then
+                NODE = NODE.Next
+            else
+                break
+            end
+            goto continue
+        end
+        
+        local questText = questButton.Text()
+        if questText and questText == name then  -- ✅ Check if Text() is not nil
+            SelectActiveQuestNode(NODE)
+            mq.doevents()
+            mq.delay(1000)
+            return NODE
+        end
 
-	::nextNode::
-	if (NODE.Child('OW_BtnQuestTemplate').Text() == name) then
-		SelectActiveQuestNode(NODE)
-		mq.doevents()
-		mq.delay(1000)
-		return NODE
-	end
+        if NODE.Siblings() then
+            NODE = NODE.Next
+        else
+            break
+        end
 
-	if (NODE.Siblings() == nil) then
-		goto nextNode
-	else
-		if (NODE.Siblings()) then
-			NODE = NODE.Next
-			goto nextNode
-		end
-	end
-
-	logger.info('\ay%s\ao not found.', name)
-	return nil
+        ::continue::
+    end
+    
+    logger.info('\ay%s\ao not found.', name)
+    return nil
 end
 
 -- Finds quest with complete name match and selects it
 -- Returns true if found; false if not
 function FindQuest(name)
-	local NODE = mq.TLO.Window(AvailableQuestList).FirstChild
+    local NODE = mq.TLO.Window(AvailableQuestList).FirstChild
 
-	::nextQuest::
-	if (NODE.Child('OW_BtnQuestTemplate').Text() == name) then
-		SelectAvailableQuestNode(NODE)
-		mq.doevents()
-		return true
-	end
+    while NODE do
+        local questButton = NODE.Child('OW_BtnQuestTemplate')
+        if not questButton then
+            if NODE.Siblings() then
+                NODE = NODE.Next
+            else
+                break
+            end
+            goto continue
+        end
 
-	if (not NODE.Siblings()) then
-		return false
-	end
+        local questText = questButton.Text()
+        if questText and questText == name then  -- ✅ Check if not nil
+            SelectAvailableQuestNode(NODE)
+            mq.doevents()
+            return true
+        end
 
-	NODE = NODE.Next
-	goto nextQuest
+        if NODE.Siblings() then
+            NODE = NODE.Next
+        else
+            break
+        end
+
+        ::continue::
+    end
+    
+    return false
 end
 
 -- Enumerates each quest.
 --     - Returns true if we can continue with more quests.  false if we are done.
 function EnumerateAvailableQuests(determineMethod, runQuestMethod, rarity, duration, typeX, level)
-	local currentIndex = 0
-	::getNext::
-	if (AreAtMaxQuests() == true) then return false end
-	
-	currentIndex = currentIndex + 1
-	if (currentIndex > AvailableQuestCount) then
-		return true
-	end
+    local currentIndex = 0
+    
+    while currentIndex < AvailableQuestCount do
+        if AreAtMaxQuests() then
+            return false
+        end
+        
+        if Aborting then
+            return false
+        end
+        
+        currentIndex = currentIndex + 1
+        
+        -- Skip if already been run
+        if AllAvailableQuests[currentIndex].available == false then
+            goto continue
+        end
 
-	if Aborting then return false end
+        local shouldRun = determineMethod(currentIndex, rarity, duration, typeX, level)
+        if not shouldRun then
+            goto continue
+        end
 
-	-- Skip if already been run
-	if (AllAvailableQuests[currentIndex].available == false) then
-		goto getNext
-	end
+        if Aborting then
+            return false
+        end
+        
+        local result = runQuestMethod(currentIndex, rarity, duration, typeX, level)
+        if not result then
+            goto continue
+        end
 
-	local result = determineMethod(currentIndex, rarity, duration, typeX, level)
-	if (result == false) then
-		goto getNext
-	end
-
-	if Aborting then return false end
-	result = runQuestMethod(currentIndex, rarity, duration, typeX, level)
-	if (result == false) then
-		goto getNext
-	end
-
-	if (AreAtMaxQuests() == true) then return false end
-
-	goto getNext
-	return true
+        if AreAtMaxQuests() then
+            return false
+        end
+        
+        ::continue::
+    end
+    
+    return true
 end
 
 function IsQuestByCategory(index, name)
@@ -2053,27 +2158,37 @@ function IsRarityDurationQuest(index, rarity, duration, typeX, level)
 end
 
 local function select_best_agents_autofill()
-	mqutils.leftmouseup('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_AutoFillButton')
-	logger.info('\atUsing AutoFill to select agents.')
-	mq.delay(250)
+    mqutils.leftmouseup('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_AutoFillButton')
+    logger.info('\atUsing AutoFill to select agents.')
+    mq.delay(250)
 
-	-- Now check if all slots were filled or not
-	local NODE = mq.TLO.Window(AvailableQuestMinions).FirstChild.Next
-	::nextAgent::
+    local firstChild = mq.TLO.Window(AvailableQuestMinions).FirstChild
+    if not firstChild then
+        logger.warning('No agent minion slots found')
+        return false
+    end
 
-	-- See if this agent is populated (if Clear Button isn't enabled, then nobody selected)
-	if (NODE.Child('OW_ALL_MinionsClearButton').Enabled() == false) then
-		return false
-	end
+    local NODE = firstChild.Next
+    if not NODE then
+        logger.warning('No second agent slot found')
+        return false
+    end
 
-	if (not NODE.Siblings()) then
-		return true
-	end
+    while NODE do
+        -- Check if this slot is populated
+        local clearButton = NODE.Child('OW_ALL_MinionsClearButton')
+        if not clearButton or not clearButton.Enabled() then
+            return false
+        end
 
-	NODE = NODE.Next
-	goto nextAgent
+        if NODE.Siblings() then
+            NODE = NODE.Next
+        else
+            break
+        end
+    end
 
-	return false
+    return true
 end
 
 function SelectBestAgents()
@@ -2113,21 +2228,31 @@ function FailedQuest_OutputFailedMinions()
 end
 
 function FailedQuest_ClearAllAssignedMinions()
-	local NODE = mq.TLO.Window(AvailableQuestMinions).FirstChild.Next
+    local firstChild = mq.TLO.Window(AvailableQuestMinions).FirstChild
+    if not firstChild then
+        return true
+    end
 
-	::nextAgent::
-	if (NODE.Child('OW_ALL_MinionsClearButton').Enabled()) then
-		mqutils.action(NODE.Child('OW_ALL_MinionsClearButton').LeftMouseUp)
-		mq.delay(250)
-	end
-	if (not NODE.Siblings()) then
-		return true
-	end
+    local NODE = firstChild.Next
+    if not NODE then
+        return true
+    end
 
-	if (NODE.Siblings()) then
-		NODE = NODE.Next
-		goto nextAgent
-	end
+    while NODE do
+        local clearButton = NODE.Child('OW_ALL_MinionsClearButton')
+        if clearButton and clearButton.Enabled() then
+            mqutils.action(clearButton.LeftMouseUp)
+            mq.delay(250)
+        end
+
+        if NODE.Siblings() then
+            NODE = NODE.Next
+        else
+            break
+        end
+    end
+
+    return true
 end
 
 function FailedQuest_ResetMinionCache()
@@ -2274,147 +2399,427 @@ function SetRarityJobCombos(name)
 end
 
 function ClaimAllAdditionalItems()
-	mq.cmd('/keypress OPEN_INV_BAGS')
-	if (Settings.General.claimAgentPacks == false and Settings.General.claimTetradrachmPacks == false and Settings.General.claimFrags == false) then
-		return
-	end
+    mq.cmd('/keypress OPEN_INV_BAGS')
+    mq.delay(500)
+    
+    -- Early exit if nothing is configured to claim
+    if not Settings.General.claimAgentPacks and 
+       not Settings.General.claimTetradrachmPacks and 
+       not Settings.General.claimCollectionFragments and
+       not Settings.General.claimEliteAgentEchos then
+        logger.debug('No additional items configured to claim')
+        mq.cmd('/keypress CLOSE_INV_BAGS')
+        return
+    end
 
-	if Settings.General.claimCollectionFragments then
-		logger.info('Checking \atCollection Fragments')
-		ClaimCollectionFragments()
-		CursorCheck()
-	end
+    if Settings.General.claimCollectionFragments then
+        logger.info('Checking \atCollection Fragments')
+        ClaimCollectionFragments()
+        CursorCheck()
+        
+        if Aborting then
+            mq.cmd('/keypress CLOSE_INV_BAGS')
+            return
+        end
+    end
 
-	if Settings.General.claimAgentPacks then
-		logger.info('Checking \atAgent Packs')
-		ClaimOverseerAgentPack()
-		ClaimAdditionalItems('Overseer Bonus Uncommon Agent')
-		CursorCheck()
-	end
+    if Settings.General.claimAgentPacks then
+        logger.info('Checking \atAgent Packs')
+        ClaimOverseerAgentPack()
+        ClaimAdditionalItems('Overseer Bonus Uncommon Agent')
+        CursorCheck()
+        
+        if Aborting then
+            mq.cmd('/keypress CLOSE_INV_BAGS')
+            return
+        end
+    end
 
-	if Settings.General.claimEliteAgentEchos then
-		logger.info('Checking \atElite Agent Echoes')
-		-- TODO: Elite Retire
-		ClaimAdditionalItems('Elite Agent Echo')
-		CursorCheck()
-	end
+    if Settings.General.claimEliteAgentEchos then
+        logger.info('Checking \atElite Agent Echoes')
+        ClaimAdditionalItems('Elite Agent Echo')
+        CursorCheck()
+        
+        if Aborting then
+            mq.cmd('/keypress CLOSE_INV_BAGS')
+            return
+        end
+    end
 
-	if Settings.General.claimTetradrachmPacks then
-		logger.info('Checking \atSealed Tetradrachm Coffer')
-		ClaimSealedTetradrachmCoffer()
-		if (ClaimAdditionalItems('Sealed Tetradrachm Coffer')) then
-			logger.info("    You now have \ay%s\ao Overseer Tetradrachm", mq.TLO.Me.OverseerTetradrachm())
-			if mq.TLO.Window('ItemDisplayWindow').Open() then
-				mq.cmd('/windowstate ItemDisplayWindow close')
-			end
-			CursorCheck()
-		end
-	end
-	mq.cmd('/keypress CLOSE_INV_BAGS')
-	mq.cmd('/keypress i')
-	if mq.TLO.Window('ItemDisplayWindow').Open() then
-		mq.cmd('/windowstate ItemDisplayWindow close')
-	end
+    if Settings.General.claimTetradrachmPacks then
+        logger.info('Checking \atSealed Tetradrachm Coffer')
+        if ClaimSealedTetradrachmCoffer() then
+            logger.info("    You now have \ay%s\ao Overseer Tetradrachm", mq.TLO.Me.OverseerTetradrachm())
+        end
+        
+        -- Claim any additional coffers that might have dropped
+        ClaimAdditionalItems('Sealed Tetradrachm Coffer')
+        CursorCheck()
+        
+        if Aborting then
+            mq.cmd('/keypress CLOSE_INV_BAGS')
+            return
+        end
+    end
+    
+    -- Cleanup
+    mq.cmd('/keypress CLOSE_INV_BAGS')
+    
+    -- Close inventory window if open
+    if mq.TLO.Window('InventoryWindow').Open() then
+        mq.cmd('/keypress i')
+    end
+    
+    -- Ensure item display window is closed
+    if mq.TLO.Window('ItemDisplayWindow').Open() then
+        mq.cmd('/windowstate ItemDisplayWindow close')
+    end
 end
 
 function ClaimCollectionFragments()
-	local itemName = 'Overseer Collection Item Dispenser Fragment'
-	if mq.TLO.FindItem(itemName).ID() == nil then
-		logger.info('No \atOverseer Collection Item Dispenser Fragment \aoFound.')
-		return false
-	end
-	mq.cmd('/keypress OPEN_INV_BAGS')
-	mq.delay(1000)
-	mqutils.autoinventory()
+    local itemName = 'Overseer Collection Item Dispenser Fragment'
+    
+    if mq.TLO.FindItem(itemName).ID() == nil then
+        logger.info('No \atOverseer Collection Item Dispenser Fragment \aoFound.')
+        return false
+    end
+    
+    mq.cmd('/keypress OPEN_INV_BAGS')
+    mq.delay(1000)
+    mqutils.autoinventory()
 
-	while mq.TLO.FindItemCount(itemName)() >= 4 do
-		logger.info('\agClaiming \ay%s', itemName)
-		mqutils.cmdf('/itemnotify "%s" rightmouseup', itemName)
-		mq.delay(1000, function() return mq.TLO.Cursor.ID() == 105880 end)
-		mqutils.autoinventory()
-		CursorCheck()
-	end
-	return true
+    local max_attempts = 100
+    local attempts = 0
+    local stuck_count = 0
+    local previous_count = mq.TLO.FindItemCount(itemName)()
+
+    logger.info('Found %d fragments to claim', previous_count)
+
+    while mq.TLO.FindItemCount(itemName)() >= 4 and attempts < max_attempts do
+        if Aborting then return false end
+        
+        local current_count = mq.TLO.FindItemCount(itemName)()
+        logger.info('\agClaiming \ay%s\ao (%d remaining)', itemName, current_count)
+        
+        mqutils.cmdf('/itemnotify "%s" rightmouseup', itemName)
+        mq.delay(1000, function() return mq.TLO.Cursor.ID() == 105880 end)
+        mqutils.autoinventory()
+        CursorCheck()
+        
+        attempts = attempts + 1
+        
+        -- Safety check: if count hasn't decreased, we might be stuck
+        current_count = mq.TLO.FindItemCount(itemName)()
+        if current_count >= previous_count then
+            stuck_count = stuck_count + 1
+            if stuck_count >= 3 then
+                logger.warning('Fragment count not decreasing after 3 attempts, aborting claim loop')
+                break
+            end
+            logger.debug('Fragment count unchanged, retry %d/3', stuck_count)
+            mq.delay(500)  -- Brief pause before retry
+        else
+            stuck_count = 0  -- Reset stuck counter on success
+        end
+        
+        previous_count = current_count
+        mq.delay(250)  -- Small delay between claims
+    end
+    
+    if attempts >= max_attempts then
+        logger.warning('Reached max attempts (%d) claiming fragments', max_attempts)
+    end
+    
+    local remaining = mq.TLO.FindItemCount(itemName)()
+    if remaining > 0 then
+        logger.info('%d fragments remaining (need 4 to combine)', remaining)
+    end
+    
+    return true
 end
 
 function ClaimOverseerAgentPack()
-	if Settings.General.claimAgentPacks == true then
-		local itemName = 'Overseer Agent Pack'
-		if mq.TLO.FindItem(itemName).ID() == nil then
-			logger.info('No \atOverseer Agent Pack \aoFound.')
-			return false
-		end
-		mq.cmd('/keypress OPEN_INV_BAGS')
-		mq.delay(1000)
-		mqutils.autoinventory()
-		mqutils.cmdf('/itemnotify "%s" rightmouseheld', itemName)
-		while mq.TLO.FindItemCount(itemName)() >= 1 and Settings.General.claimAgentPacks == true do
-			logger.info('\agClaiming \ay%s', itemName)
-			mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
-			mq.delay(2000)
-			CursorCheck()
-		end
-		return true
-	end
+    if not Settings.General.claimAgentPacks then
+        return false
+    end
+    
+    local itemName = 'Overseer Agent Pack'
+    
+    if mq.TLO.FindItem(itemName).ID() == nil then
+        logger.info('No \atOverseer Agent Pack \aoFound.')
+        return false
+    end
+    
+    mq.cmd('/keypress OPEN_INV_BAGS')
+    mq.delay(1000)
+    mqutils.autoinventory()
+    
+    local pack_count = mq.TLO.FindItemCount(itemName)()
+    logger.info('Found %d agent pack(s) to claim', pack_count)
+    
+    -- Open the item display window
+    mqutils.cmdf('/itemnotify "%s" rightmouseheld', itemName)
+    mq.delay(1500, function() return mq.TLO.Window('ItemDisplayWindow').Open() end)
+    
+    if not mq.TLO.Window('ItemDisplayWindow').Open() then
+        logger.error('Failed to open ItemDisplayWindow for agent packs')
+        return false
+    end
+    
+    local max_attempts = 100
+    local attempts = 0
+    local stuck_count = 0
+    local previous_count = pack_count
+    
+    while mq.TLO.FindItemCount(itemName)() >= 1 and 
+          Settings.General.claimAgentPacks and 
+          attempts < max_attempts do
+        
+        if Aborting then
+            if mq.TLO.Window('ItemDisplayWindow').Open() then
+                mq.cmd('/windowstate ItemDisplayWindow close')
+            end
+            return false
+        end
+        
+        local current_count = mq.TLO.FindItemCount(itemName)()
+        logger.info('\agClaiming \ay%s\ao (%d remaining)', itemName, current_count)
+        
+        -- Check if window is still open
+        if not mq.TLO.Window('ItemDisplayWindow').Open() then
+            logger.warning('ItemDisplayWindow closed unexpectedly')
+            break
+        end
+        
+        mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
+        mq.delay(2000, function() return mq.TLO.FindItemCount(itemName)() < current_count end)
+        CursorCheck()
+        
+        attempts = attempts + 1
+        
+        -- Safety check for stuck loop
+        current_count = mq.TLO.FindItemCount(itemName)()
+        if current_count >= previous_count then
+            stuck_count = stuck_count + 1
+            if stuck_count >= 3 then
+                logger.warning('Agent pack count not decreasing, aborting')
+                break
+            end
+            mq.delay(1000)  -- Wait longer before retry
+        else
+            stuck_count = 0
+        end
+        
+        previous_count = current_count
+        mq.delay(500)
+    end
+    
+    -- Close window
+    if mq.TLO.Window('ItemDisplayWindow').Open() then
+        mq.cmd('/windowstate ItemDisplayWindow close')
+    end
+    
+    if attempts >= max_attempts then
+        logger.warning('Reached max attempts (%d) claiming agent packs', max_attempts)
+    end
+    
+    logger.info('Claimed %d agent pack(s)', pack_count - mq.TLO.FindItemCount(itemName)())
+    return true
 end
 
 function ClaimSealedTetradrachmCoffer()
-	if Settings.General.claimTetradrachmPacks == true then
-		local itemName = 'Sealed Tetradrachm Coffer'
-		if mq.TLO.FindItem(itemName).ID() == nil then
-			logger.info('No \atSealed Tetradrachm Coffer \aoFound.')
-			return false
-		end
-		mq.cmd('/keypress OPEN_INV_BAGS')
-		mq.delay(1000)
-		mqutils.autoinventory()
-		mqutils.cmdf('/itemnotify "%s" rightmouseheld', itemName)
-		mq.delay(1000)
-		logger.info('\agClaiming \aoSealed Tetradrachm Coffer')
-		mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
-		while mq.TLO.FindItemCount(itemName)() >= 1 and Settings.General.claimTetradracmPacks == true do
-			logger.info('\agClaiming \ay%s', itemName)
-			mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
-			mq.delay(2000)
-			CursorCheck()
-		end
-		return true
-	end
+    if not Settings.General.claimTetradrachmPacks then
+        return false
+    end
+    
+    local itemName = 'Sealed Tetradrachm Coffer'
+    
+    if mq.TLO.FindItem(itemName).ID() == nil then
+        logger.info('No \atSealed Tetradrachm Coffer \aoFound.')
+        return false
+    end
+    
+    mq.cmd('/keypress OPEN_INV_BAGS')
+    mq.delay(1000)
+    mqutils.autoinventory()
+    
+    local coffer_count = mq.TLO.FindItemCount(itemName)()
+    logger.info('Found %d tetradrachm coffer(s) to claim', coffer_count)
+    
+    -- Open the item display window
+    mqutils.cmdf('/itemnotify "%s" rightmouseheld', itemName)
+    mq.delay(1500, function() return mq.TLO.Window('ItemDisplayWindow').Open() end)
+    
+    if not mq.TLO.Window('ItemDisplayWindow').Open() then
+        logger.error('Failed to open ItemDisplayWindow for tetradrachm coffers')
+        return false
+    end
+    
+    -- Claim first one
+    logger.info('\agClaiming \aoSealed Tetradrachm Coffer')
+    mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
+    mq.delay(2000)
+    CursorCheck()
+    
+    local max_attempts = 100
+    local attempts = 0
+    local stuck_count = 0
+    local previous_count = mq.TLO.FindItemCount(itemName)()
+    
+    while mq.TLO.FindItemCount(itemName)() >= 1 and 
+          Settings.General.claimTetradrachmPacks and 
+          attempts < max_attempts do
+        
+        if Aborting then
+            if mq.TLO.Window('ItemDisplayWindow').Open() then
+                mq.cmd('/windowstate ItemDisplayWindow close')
+            end
+            return false
+        end
+        
+        local current_count = mq.TLO.FindItemCount(itemName)()
+        logger.info('\agClaiming \ay%s\ao (%d remaining)', itemName, current_count)
+        
+        -- Check if window is still open
+        if not mq.TLO.Window('ItemDisplayWindow').Open() then
+            logger.warning('ItemDisplayWindow closed unexpectedly')
+            break
+        end
+        
+        mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
+        mq.delay(2000, function() return mq.TLO.FindItemCount(itemName)() < current_count end)
+        CursorCheck()
+        
+        attempts = attempts + 1
+        
+        -- Safety check for stuck loop
+        current_count = mq.TLO.FindItemCount(itemName)()
+        if current_count >= previous_count then
+            stuck_count = stuck_count + 1
+            if stuck_count >= 3 then
+                logger.warning('Coffer count not decreasing, aborting')
+                break
+            end
+            mq.delay(1000)  -- Wait longer before retry
+        else
+            stuck_count = 0
+        end
+        
+        previous_count = current_count
+        mq.delay(500)
+    end
+    
+    -- Close window
+    if mq.TLO.Window('ItemDisplayWindow').Open() then
+        mq.cmd('/windowstate ItemDisplayWindow close')
+    end
+    
+    if attempts >= max_attempts then
+        logger.warning('Reached max attempts (%d) claiming coffers', max_attempts)
+    end
+    
+    local claimed = coffer_count - mq.TLO.FindItemCount(itemName)()
+    logger.info('Claimed %d tetradrachm coffer(s)', claimed)
+    
+    return true
 end
 
 function ClaimAdditionalItems(itemName)
-	if mq.TLO.FindItem(itemName).ID() == nil then
-		return false
-	end
-	local counter = 0
-	mqutils.InspectItem(itemName)
+    if mq.TLO.FindItem(itemName).ID() == nil then
+        logger.debug('No %s found', itemName)
+        return false
+    end
+    
+    local item_count = mq.TLO.FindItemCount(itemName)()
+    logger.info('Found %d %s to claim', item_count, itemName)
+    
+    -- Open item display window
+    mqutils.InspectItem(itemName)
+    mq.delay(1500, function() return mq.TLO.Window('ItemDisplayWindow').Open() end)
+    
+    if not mq.TLO.Window('ItemDisplayWindow').Open() then
+        logger.error('Failed to open ItemDisplayWindow for %s', itemName)
+        return false
+    end
+    
+    local max_attempts = 100
+    local counter = 0
+    local stuck_count = 0
+    local previous_count = item_count
 
-	while mq.TLO.FindItem(itemName).ID() do
-		logger.info('\agClaiming \ay%s\ao.', itemName)
+    while mq.TLO.FindItem(itemName).ID() and counter < max_attempts do
+        if Aborting then
+            if mq.TLO.Window('ItemDisplayWindow').Open() then
+                mq.cmd('/windowstate ItemDisplayWindow close')
+            end
+            return false
+        end
+        
+        -- Check configuration (specifically for Elite Agent Echoes)
+        if itemName == 'Elite Agent Echo' then
+            if not Settings.General.claimEliteAgentEchos or 
+               not Settings.Rewards.eliteAgentEchoReward or 
+               Settings.Rewards.eliteAgentEchoReward == 'None' then
+                logger.info('Elite Agent Echo claiming disabled via configuration')
+                if mq.TLO.Window('ItemDisplayWindow').Open() then
+                    mq.cmd('/windowstate ItemDisplayWindow close')
+                end
+                return false
+            end
+        end
+        
+        -- Check if window closed unexpectedly
+        if not mq.TLO.Window('ItemDisplayWindow').Open() then
+            logger.error('\arItemDisplayWindow\ao was closed. Stopping claiming of \ay%s\ao for this run.', itemName)
+            return false
+        end
+        
+        local current_count = mq.TLO.FindItemCount(itemName)()
+        logger.info('\agClaiming \ay%s\ao (%d remaining)', itemName, current_count)
+        
+        mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
+        mq.delay(2000, function() return mq.TLO.FindItemCount(itemName)() < current_count end)
+        mqutils.autoinventory(true)
+        CursorCheck()
+        
+        counter = counter + 1
+        
+        -- Special handling for Elite Agent Echoes
+        if itemName == 'Elite Agent Echo' and mq.TLO.FindItemCount('Elite Agent Echo')() > 0 then
+            CollectAllRewards()
+        end
+        
+        -- Safety check for stuck loop
+        current_count = mq.TLO.FindItemCount(itemName)()
+        if current_count >= previous_count then
+            stuck_count = stuck_count + 1
+            if stuck_count >= 3 then
+                logger.warning('%s count not decreasing after 3 attempts, aborting', itemName)
+                break
+            end
+            logger.debug('Item count unchanged, retry %d/3', stuck_count)
+            mq.delay(1000)  -- Wait longer before retry
+        else
+            stuck_count = 0
+        end
+        
+        previous_count = current_count
+        mq.delay(500)
+    end
+    
+    -- Close window
+    if mq.TLO.Window('ItemDisplayWindow').Open() then
+        mq.cmd('/windowstate ItemDisplayWindow close')
+    end
+    
+    if counter >= max_attempts then
+        logger.warning('Reached max attempts (%d) claiming %s', max_attempts, itemName)
+    end
+    
+    local claimed = item_count - mq.TLO.FindItemCount(itemName)()
+    logger.info('Claimed %d %s', claimed, itemName)
 
-		-- TODO: Improve logic to properly re-initiate this. For now, if Item Window gets closed, walk away
-		if (mq.TLO.Window('ItemDisplayWindow').Open() == false or Settings.General.claimEliteAgentEchos == false or Settings.Rewards.eliteAgentEchoReward == nil or Settings.Rewards.eliteAgentEchoReward == 'None') then
-			logger.error('\arItemDisplayWindow\ao was closed.  Stopping claiming of \ay%s\ao for this run.', itemName)
-			return false
-		end
-		counter = counter + 1
-		if counter > 100 then
-			if mq.TLO.Window('ItemDisplayWindow').Open() then
-				logger.info('Closing Window after 100 Attempts to Claim')
-				mq.cmd('/windowstate ItemDisplayWindow close')
-			end
-		end
-		mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
-		mqutils.autoinventory(true)
-
-		if mq.TLO.FindItemCount('Elite Agent Echo')() > 0 then
-			CollectAllRewards()
-		end
-
-		CursorCheck()
-	end
-
-	return true
+    return true
 end
 
 function OutputAvailableQuestList()
@@ -2504,48 +2909,83 @@ end
 -- doneAction:  Callback method called at end of operation
 --		signature: void X(typeIndex)
 local function walk_agents(typeIndex, action, startAction, doneAction)
-	if (startAction ~= nil) then
-		startAction(typeIndex)
-	end
+    if startAction ~= nil then
+        startAction(typeIndex)
+    end
 
-	mqutils.cmdf('/notify OverseerWnd OW_OM_RarityFilter listselect %s', typeIndex+1)
-	mq.delay(250)
+    mqutils.cmdf('/notify OverseerWnd OW_OM_RarityFilter listselect %s', typeIndex+1)
+    mq.delay(250)
 
-	local agentNode = mq.TLO.Window('OverseerWnd/OW_OM_MinionList').FirstChild
+    local agentNode = mq.TLO.Window('OverseerWnd/OW_OM_MinionList').FirstChild
+    if not agentNode then
+        if doneAction ~= nil then
+            doneAction(typeIndex)
+        end
+        return
+    end
 
-	local lastAgentName = nil
+    local lastAgentName = nil
 
-	::nextAgent::
-	if Aborting then return end
+    while agentNode and not Aborting do
+        -- Safety check for valid node
+        if agentNode.Height() == nil or agentNode.Height() <= 0 then
+            if agentNode.Siblings() then
+                agentNode = agentNode.Next
+            else
+                break
+            end
+            goto continue
+        end
 
-	local agentText = agentNode.Child('OW_OM_MinionEntry').Text()
-	local index = string.find(agentText, 'Status')
-	local agentName = string.sub(agentText, 1, index - 2)
-	local agentStatus = string.sub(agentText, index + 8)
+        -- Get agent text with error handling
+        local agentChild = agentNode.Child('OW_OM_MinionEntry')
+        if not agentChild then
+            logger.warning('No OW_OM_MinionEntry found for agent node')
+            if agentNode.Siblings() then
+                agentNode = agentNode.Next
+            else
+                break
+            end
+            goto continue
+        end
 
-	local isDuplicate = agentName == lastAgentName
+        local agentText = agentChild.Text()
+        local index = string.find(agentText, 'Status')
+        
+        if not index then
+            logger.warning('Malformed agent text: %s', agentText or 'nil')
+            if agentNode.Siblings() then
+                agentNode = agentNode.Next
+            else
+                break
+            end
+            goto continue
+        end
 
-	if (agentNode.Height() ~= nil) and (agentNode.Height() > 0) then
-		if (action(typeIndex, agentName, agentStatus, agentNode, isDuplicate) == false) then
-			return agentNode
-		end
-	end
+        local agentName = string.sub(agentText, 1, index - 2)
+        local agentStatus = string.sub(agentText, index + 8)
+        local isDuplicate = agentName == lastAgentName
 
-	lastAgentName = agentName
-	--if (agentNode.Siblings() == nil) then
-	if not agentNode.Siblings() then
-		goto nextAgent
-	end
+        -- Execute action callback
+        if action(typeIndex, agentName, agentStatus, agentNode, isDuplicate) == false then
+            return agentNode
+        end
 
-	--if (agentNode.Siblings() ~= nil) and (agentNode.Siblings()) then
-	if not agentNode.Siblings() and agentNode.Siblings() then
-		agentNode = agentNode.Next
-		goto nextAgent
-	end
+        lastAgentName = agentName
 
-	if (doneAction ~= nil) then
-		doneAction(typeIndex)
-	end
+        -- Move to next sibling
+        if agentNode.Siblings() then
+            agentNode = agentNode.Next
+        else
+            break
+        end
+
+        ::continue::
+    end
+
+    if doneAction ~= nil then
+        doneAction(typeIndex)
+    end
 end
 
 local agent_select_temp_name, agent_select_temp_status
@@ -2812,81 +3252,39 @@ local function safe_call(func, ...)
 end
 
 function DumpQuestDetails()
-    -- open window (keep original behavior)
-    if type(OpenOverseerWindow) == "function" then
-        pcall(OpenOverseerWindow)
+    -- Open window
+    OpenOverseerWindow()
+    
+    -- Load rewards plugin if needed
+    local weLoadedMq2Rewards = load_mq2rewards()
+    
+    -- Reload quests with extra data
+    ReloadAvailableQuests(true)
+    
+    -- Unload if we loaded it
+    if weLoadedMq2Rewards then
+        unload_mq2rewards()
     end
-
-    -- attempt to load mq2rewards if available
-    local weLoadedMq2Rewards = false
-    if type(load_mq2rewards) == "function" then
-        local ok, res = pcall(load_mq2rewards)
-        if ok and res ~= false then
-            weLoadedMq2Rewards = true
-        end
-    end
-
-    -- reload quests (wrap in pcall in case of errors)
-    if type(ReloadAvailableQuests) == "function" then
-        pcall(ReloadAvailableQuests, true)
-    end
-
-    -- unload mq2rewards if we loaded it
-    if weLoadedMq2Rewards and type(unload_mq2rewards) == "function" then
-        pcall(unload_mq2rewards)
-    end
-
-    -- Build an integer seed safely
-    local name = nil
-    if mq and mq.TLO and mq.TLO.Me and type(mq.TLO.Me.CleanName) == "function" then
-        local ok, n = pcall(mq.TLO.Me.CleanName)
-        if ok then name = n end
-    end
-
-    local t = os.time() or 0
-    local c = math.floor((os.clock() or 0) * 1000000) % 1000000
-    local nh = hash_string_to_int(name)
-    local seed = (t + c + nh) % 0x7fffffff
-    math.randomseed(seed)
-
-    -- warm up RNG a few times (to avoid low-quality initial values)
-    for i = 1, 6 do
-        math.random()
-    end
-
-    -- ensure output directory exists
+    
+    -- Ensure data directory exists
     local data_dir = "data"
-    local ok, err = ensure_dir(data_dir)
-    if not ok then
-        print(("Failed to ensure data directory '%s': %s"):format(data_dir, tostring(err)))
-        return nil, "failed to create data directory"
+    ensure_dir(data_dir)
+    
+    -- Validate data
+    if not AllAvailableQuests then
+        logger.error('No quests to save')
+        return
     end
-
-    -- validate AllAvailableQuests
-    if AllAvailableQuests == nil then
-        print("AllAvailableQuests is nil — nothing to save.")
-        return nil, "no quests to save"
-    end
-
-    -- build filename: include name (sanitized), timestamp and random suffix
-    local safe_name = tostring(name or "unknown"):gsub("[^%w%-_]", "_")
-    local ts = os.date("%Y%m%d_%H%M%S", t)
-    local rnd = math.random(100000, 999999)
-    local filename = string.format('%s/quests_%s_%s_%d.json', data_dir, safe_name, ts, rnd)
-
-    -- attempt to save using json_file.saveTable, with pcall to capture errors
-    if type(json_file) ~= "table" or type(json_file.saveTable) ~= "function" then
-        print("json_file.saveTable is not available.")
-        return nil, "json_file.saveTable missing"
-    end
-
-    local ok_save, save_err = pcall(json_file.saveTable, AllAvailableQuests, filename)
-    if not ok_save then
-        print(("Failed to save quests to '%s': %s"):format(filename, tostring(save_err)))
-        return nil, save_err
-    end
-
-    print(("Saved %d quest(s) to %s"):format((type(AllAvailableQuests) == "table" and #AllAvailableQuests) or 0, filename))
+    
+    -- Build filename
+    local char_name = mqfacade.GetCharNameAndClass():gsub("[^%w%-_]", "_")
+    local timestamp = os.date("%Y%m%d_%H%M%S")
+    local filename = string.format('%s/quests_%s_%s.json', data_dir, char_name, timestamp)
+    
+    -- Save
+    json_file.saveTable(AllAvailableQuests, filename)
+    logger.info('Saved %d quests to %s', #AllAvailableQuests, filename)
+    
     return filename
 end
 
