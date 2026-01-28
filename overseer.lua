@@ -4,10 +4,10 @@
 
 local mq = require('mq')
 local mqfacade = require('mq_facade')
-local string_utils = require('utils.string_utils')
-local mqutils = require('utils.mq_utils')
-local logger = require('utils.logger')
-local json_file = require('utils.json_file')
+local string_utils = require('utils/string_utils')
+local mqutils = require('utils/mq_utils')
+local logger = require('utils/logger')
+local json_file = require('utils/json_file')
 local db = require('database')
 local utils = require('utils.utils')
 
@@ -46,9 +46,6 @@ NextRotationTimeStampText = ''
 
 CountAgentsBetweenCycles = false
 
-local function printf(...)
-    print(string.format(...))
-end
 ---Perform any actions on first-time startup.
 local function initialize()
 	if (actions.HasMaxQuestLabel() == false and Settings.General.autoRestartEachCycle == true) then
@@ -79,7 +76,6 @@ function actions.Main()
 			elseif (nextAction == 'RunGeneralQuests') then SetCurrentProcess('Running general quests') RunGeneralQuests()
 			elseif (nextAction == 'SelectBestAgents') then SetCurrentProcess('Selecting best agents') SelectBestAgents()
 			elseif (nextAction == 'PreviewGeneralQuestList') then SetCurrentProcess('Generating quest preview list') PreviewGeneralQuestList()
-			elseif (nextAction == 'CollectAllRewards') then SetCurrentProcess('Collecting Rewards') CollectAllRewards()
 			elseif (nextAction == 'RetireEliteAgent') then SetCurrentProcess('Retiring Elite Agent') RetireEliteAgent(nextActionParameter)
 			elseif (nextAction == 'RetireEliteAgents') then SetCurrentProcess('Retiring Elite Agents') RetireEliteAgents()
 			elseif (nextAction == 'DumpQuestDetails') then SetCurrentProcess('Outputting Quest Details') DumpQuestDetails()
@@ -223,9 +219,8 @@ function UpdateTimers()
 	end
 end
 
-
+local tabs = { 'OW_OverseerQuestsPage', 'OW_OverseerMinionsPage', 'OW_OverseerActiveQuestsPage', 'OW_OverseerStatsPage' }
 local function ChangeTab(tabIndex)
-	local tabs = { 'OW_OverseerQuestsPage', 'OW_OverseerMinionsPage', 'OW_OverseerActiveQuestsPage', 'OW_OverseerStatsPage' }
 	if (mq.TLO.Window('OverseerWnd/OW_Subwindows').Child(tabs[tabIndex]).Open() == true) then
 		return
 	end
@@ -341,7 +336,6 @@ function RunCompleteCycle()
 	ParseQuestRotationTime()	if Aborting then return end
 
 	local nextCheck = math.min(MinutesUntilNextQuest, math.floor(SecondsUntilNextRotation / 60))
-
 	if nextCheck >= 0 then
 		logger.warning('*** ' .. nextCheck .. ' minutes until next overseer check.  ' .. os.date('(%H:%M:%S)', os.time()))
 	else
@@ -352,6 +346,8 @@ function RunCompleteCycle()
 	if (Settings.General.campAfterFullCycle) then
 		CampCharacterToDesktop()
 	end
+	-- Schedule collect statistics after each completed cycle
+	CollectAgentStatistics()
 end
 
 function PreviewGeneralQuestList()
@@ -922,12 +918,15 @@ function CollectSpecificReward(rewardItem, rewardIndex, gather_exp_list_only, re
 	end
 
 	if (string_utils.starts_with(rewardItem.Text(), "Elite Agent Echo")) then
+		local option = rewardItem.Option(Settings.Rewards.eliteAgentEchoReward)
+		
 		if (Settings.General.claimEliteAgentEchos == false or Settings.Rewards.eliteAgentEchoReward == nil or Settings.Rewards.eliteAgentEchoReward == 'None') then
+			collect_reward_option(option, rewardItem, Settings.Rewards.eliteAgentEchoReward, rewardIndex)
 			logger.info('Skipping Elite Agent Echo due to configuration settings.')
 			return ClaimReward_Skipped
 		end
 
-		local option = rewardItem.Option(Settings.Rewards.eliteAgentEchoReward)
+		
 		if (tostring(option) == "NULL") then
 			logger.error('Skipping Elite Agent Echo as configured reward is missing (assumed invalid): %s', Settings.Rewards.eliteAgentEchoReward)
 			return ClaimReward_Skipped
@@ -1109,8 +1108,6 @@ function RunConversions()
 	ProcessConversion(1, 'Common Conversion')	if Aborting then return end
 	ProcessConversion(2, 'Uncommon Conversion')	if Aborting then return end
 	ProcessConversion(3, 'Rare Conversion')		if Aborting then return end
-	
-	--RetireEliteAgents()
 end
 
 function RunCategoryQuests(category)
@@ -1331,7 +1328,6 @@ function LoadAvailableQuests(loadExtraData)
 	if mq.TLO.Window('RewardSelectionWnd').Open() then
 		CloseRewardWindow()
 	end
-
 	AvailableQuestListLoaded = true
 end
 
@@ -1736,13 +1732,14 @@ function ProcessConversionQuest(priority)
 
 	mqutils.action(NODE.Child('OW_ALL_MinionSelectBtn').LeftMouseUp)
 	mq.doevents()
-	mq.delay(2000)
+	mq.delay(1500)
 
 	local result = SelectNextDuplicateAgent(priority)
 	if (result == false) then
 		logger.info('Not enough duplicate agents for \ay%s', questName)
 		return false
 	end
+
 	if nil == NODE.Siblings() then
 		goto nextAgent
 	else
@@ -1902,7 +1899,7 @@ function SelectActiveQuest(name)
 	if (NODE.Child('OW_BtnQuestTemplate').Text() == name) then
 		SelectActiveQuestNode(NODE)
 		mq.doevents()
-	mq.delay(1000)
+		mq.delay(1000)
 		return NODE
 	end
 
@@ -2011,7 +2008,6 @@ end
 local function select_best_agents_autofill()
 	mqutils.leftmouseup('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_AutoFillButton')
 	print('\agOverseer\ay - \atUsing AutoFill to select agents.')
-
 	mq.delay(250)
 
 	-- Now check if all slots were filled or not
@@ -2099,13 +2095,6 @@ end
 
 function CloseRewardWindow()
 	mqutils.CloseAllWindowsOfType('RewardSelectionWnd')
-	local rewardWindow = mq.TLO.Window('RewardSelectionWnd')
-	-- Do this to ensure we don't have the Preview
-	if (rewardWindow.Open()) then
-		mq.parse('/windowstate RewardSelectionWnd close')
-		-- mq.delay(1000, mq.TLO.Window('RewardSelectionWnd').Open())
-		mq.parse('/delay 1s !${Window[RewardSelectionWnd].Open}')
-	end
 end
 
 function OpenRewardWindow()
@@ -2269,7 +2258,6 @@ function ClaimAllAdditionalItems()
 			CursorCheck()
 		end
 	end
-
 	mq.cmd('/keypress CLOSE_INV_BAGS')
 	mq.cmd('/keypress i')
 	if mq.TLO.Window('ItemDisplayWindow').Open() then
@@ -2282,10 +2270,8 @@ function ClaimCollectionFragments()
 	if mq.TLO.FindItem(itemName).ID() == nil then
 		return false
 	end
-
 	mq.cmd('/keypress OPEN_INV_BAGS')
 	mq.delay(1000)
-
 	mqutils.autoinventory()
 
 	while mq.TLO.FindItemCount(itemName)() >= 4 do
@@ -2311,7 +2297,6 @@ function ClaimAdditionalItems(itemName)
 		-- TODO: Improve logic to properly re-initiate this. For now, if Item Window gets closed, walk away
 		if (mq.TLO.Window('ItemDisplayWindow').Open() == false or Settings.General.claimEliteAgentEchos == false or Settings.Rewards.eliteAgentEchoReward == nil or Settings.Rewards.eliteAgentEchoReward == 'None') then
 			logger.error('\arItemDisplayWindow\ao was closed.  Stopping claiming of \ay%s\ao for this run.', itemName)
-			CollectAllRewards()
 			return false
 		end
 		
@@ -2436,7 +2421,7 @@ local function walk_agents(typeIndex, action, startAction, doneAction)
 
 	local isDuplicate = agentName == lastAgentName
 
-	if (agentNode.Height() ~= nil and agentNode.Height() > 0) then
+	if (agentNode.Height() ~= nil) and (agentNode.Height() > 0) then
 		if (action(typeIndex, agentName, agentStatus, agentNode, isDuplicate) == false) then
 			return agentNode
 		end
@@ -2447,7 +2432,7 @@ local function walk_agents(typeIndex, action, startAction, doneAction)
 		goto nextAgent
 	end
 
-	if (agentNode.Siblings() ~= nil and agentNode.Siblings()) then
+	if (agentNode.Siblings() ~= nil) and (agentNode.Siblings()) then
 		agentNode = agentNode.Next
 		goto nextAgent
 	end
@@ -2546,7 +2531,6 @@ function RetireEliteAgent(name)
 	mqutils.leftmouseup('OverseerWnd/OW_OverseerMinionsPage/OW_OM_RetireButton')
 
 	mqutils.WaitForWindow('ConfirmationDialogBox')
-
 	if (mq.TLO.Window('ConfirmationDialogBox').Open()) then
 		mqutils.click_confirmation_yes()
 	end
@@ -2554,7 +2538,6 @@ function RetireEliteAgent(name)
 	if (AgentStatisticSpecificCounts['elite'].agents ~= nil and AgentStatisticSpecificCounts['elite'].agents[name] ~= nil) then
 		AgentStatisticSpecificCounts['elite'].agents[name].count = AgentStatisticSpecificCounts['elite'].agents[name].count - 1
 	end
-
 	CloseOverseerWindow()
 end
 
@@ -2740,4 +2723,3 @@ mq.event('NoPendingRewards', '#*#You currently do not have any pending rewards.#
 mq.event('ErrorGrantingReward', '#*#The system is currently unable to grant your reward for#*#', Event_ErrorGrantingRewards)
 
 return actions
-
