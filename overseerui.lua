@@ -22,6 +22,49 @@ MyShowUi = true
 
 local TEXT_BASE_HEIGHT = ImGui.GetTextLineHeightWithSpacing();
 
+-- List of process names that should show a cancel button when active
+local cancelable_processes = {
+    ['Claiming completed missions'] = true,
+    ['Running conversion quests'] = true,
+    ['Running recruit quests'] = true,
+    ['Running general quests'] = true,
+    ['Generating quest preview list'] = true,
+}
+
+--- Helper combo that selects a string from an ordered list of options.
+-- on_select will be called with the selected string (not index) when user picks an entry.
+local function ComboSelectString(label, current_value, options, on_select)
+    local selected = nil
+    if ImGui.BeginCombo(label, current_value) then
+        for _, opt in ipairs(options) do
+            if ImGui.Selectable(opt, opt == current_value) then
+                selected = opt
+            end
+            if opt == current_value then
+                ImGui.SetItemDefaultFocus()
+            end
+        end
+        ImGui.EndCombo()
+    end
+    if selected then
+        on_select(selected)
+    end
+end
+
+--- safer add_claim_table_row: coerce numeric values and guard nil
+local function add_claim_table_row(name, value)
+    ImGui.TableNextRow()
+    ImGui.TableNextColumn()
+    uiutils.text_colored(TextStyle.ItemValueDetail, name)
+    ImGui.TableNextColumn()
+    local num = tonumber(value)
+    if num ~= nil and num > 0 then
+        ImGui.TextColored(0, 1, 0, 1, tostring(num))
+    else
+        ImGui.Text(string.format("%s", (value ~= nil and tostring(value) or "0")))
+    end
+end
+
 function actions.InitializeUi(showUi)
     mq.imgui.init('Overseer LUA UI', DrawMainWindow)
     MyShowUi = showUi
@@ -50,7 +93,8 @@ function DrawMainWindow()
     if pending_window_size ~= nil then
         -- SetNextWindowSize must be called BEFORE Begin to affect the window.
         ImGui.SetNextWindowSize(pending_window_size.width, pending_window_size.height)
-        -- keep pending_window_size so the window stays at this size until changed again
+        -- apply once; clear pending window size so user can resize later
+        pending_window_size = nil
     end
 
     local changed
@@ -110,18 +154,6 @@ end
 
 local game_states = { "CHARSELECT", "INGAME", "PRECHARSELECT", "UNKNOWN" }
 local subscription_levels = { "GOLD", "SILVER", "FREE", "UNKNOWN" }
-
-local function add_claim_table_row(name, value)
-    ImGui.TableNextRow()
-    ImGui.TableNextColumn()
-    uiutils.text_colored(TextStyle.ItemValueDetail, name)
-    ImGui.TableNextColumn()
-    if value > 0 then
-        ImGui.TextColored(0, 1, 0, 1, value)
-    else
-        ImGui.Text(string.format("%s", value))
-    end
-end
 
 function RenderGeneralTab()
     local changed
@@ -183,7 +215,7 @@ function RenderGeneralTab()
                 if (InProcess) then
                     ImGui.PushStyleColor(ImGuiCol.Text, 0.999, 0.999, 0.999, 1)
                     ImGui.PushStyleColor(ImGuiCol.Button, 0.690, 0.100, 0.100, 1)
-                    uiutils.add_button(icons.MD_PAN_TOOL, overseer.AbortCurrentProcess, 'Cancel Full Cycle')
+                    uiutils.add_button(icons.MD_PAN_TOOL, overseer.AbortCurrentProcess)
 
                     ImGui.PopStyleColor(2)
                 else
@@ -365,6 +397,10 @@ function RenderSettingsGeneralTab()
 
             if Settings.General.agentCountForConversionCommon < 2 then Settings.General.agentCountForConversionCommon = 1 end
             if (changed) then settings.SaveSettings() end
+                        ImGui.SameLine()
+            if ImGui.Button'Mass Convert Common' then
+                mq.cmdf('/overseermassconvert common %s', Settings.General.agentCountForConversionCommon)
+            end
 
             ImGui.PushItemWidth(100)
             Settings.General.agentCountForConversionUncommon, changed = ImGui.InputInt("Uncommon",
@@ -372,6 +408,11 @@ function RenderSettingsGeneralTab()
             uiutils.add_tooltip('Specifies number of uncommon agents to maintain\n\nCommand: conversionCountUncommon #')
             if Settings.General.agentCountForConversionUncommon < 2 then Settings.General.agentCountForConversionUncommon = 1 end
             if (changed) then settings.SaveSettings() end
+                        ImGui.SameLine()
+            local uncommon = Settings.General.agentCountForConversionUncommon
+            if ImGui.Button'Mass Convert Uncommon' then
+                mq.cmdf('/overseermassconvert uncommon %s', uncommon)
+            end
 
             ImGui.PushItemWidth(100)
             Settings.General.agentCountForConversionRare, changed = ImGui.InputInt("Rare",
@@ -379,6 +420,10 @@ function RenderSettingsGeneralTab()
             uiutils.add_tooltip('Specifies number of rare agents to maintain\n\nCommand: conversionCountRare #')
             if Settings.General.agentCountForConversionRare < 2 then Settings.General.agentCountForConversionRare = 1 end
             if (changed) then settings.SaveSettings() end
+                        ImGui.SameLine()
+            if ImGui.Button'Mass Convert Rare' then
+                mq.cmdf('/overseermassconvert rare %s', Settings.General.agentCountForConversionRare)
+            end
 
             if (Settings.General.convertEliteAgents) then
                 ImGui.PushItemWidth(100)
@@ -387,6 +432,10 @@ function RenderSettingsGeneralTab()
                 uiutils.add_tooltip('Specifies number of elite agents to maintain\n\nCommand: conversionCountElite #')
                 if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
                 if (changed) then settings.SaveSettings() end
+                                ImGui.SameLine()
+            if ImGui.Button'Mass Convert Elite' then
+                mq.cmdf('/overseermassconvert elite %s', Settings.General.agentCountForConversionElite)
+            end
                 ImGui.Unindent(20)
             end
         end
@@ -519,7 +568,8 @@ local all_rewards = {
     "Torment of Velious",
     "Claws of Veeshan",
     "Terror of Luclin",
-    "Night of Shadows"
+    "Night of Shadows",
+    "Laurion's Song"
 }
 
 local active_item_current_idx = 0
@@ -1021,7 +1071,7 @@ function RenderActionsTab()
             'Calculates actual quests which would be run at this time. **No actual quests will be invoked.')
 
         if (CurrentProcessName ~= "Initialze") then
-            if (InProcess and CurrentProcessName == ('Claiming completed missions' or 'Running conversion quests' or 'Running recruit quests' or 'Running general quests' or 'Generating quest preview list')) then
+            if (InProcess and cancelable_processes[CurrentProcessName]) then
                 ImGui.SameLine()
                 ImGui.PushStyleColor(ImGuiCol.Text, 0.999, 0.999, 0.999, 1)
                 ImGui.PushStyleColor(ImGuiCol.Button, 0.690, 0.100, 0.100, 1)
@@ -1276,49 +1326,14 @@ function RenderTestTab()
             mqFacade.SetCharName(name)
         end
 
-        -- local resultvar = uiutils.draw_combo_box("##GameState", mqFacade.GetGameState(), game_states, false)
-        -- if (resultvar ~= nil) then
-        --     mqFacade.SetGameState(resultvar)
-        -- end
+        -- Use ComboSelectString helper to present ordered options and return the chosen string.
+        ComboSelectString("Game State", mqFacade.GetGameState(), game_states, function(sel)
+            mqFacade.SetGameState(sel)
+        end)
 
-        local bykey = false
-        local resultvar = nil
-        if ImGui.BeginCombo("Game State", mqFacade.GetGameState()) then
-            for i, j in pairs(game_states) do
-                if bykey then
-                    if ImGui.Selectable(i, i == resultvar) then
-                        resultvar = i
-                    end
-                else
-                    if ImGui.Selectable(j, j == resultvar) then
-                        resultvar = j
-                    end
-                end
-            end
-            if (resultvar ~= nil) then
-                mqFacade.SetGameState(resultvar)
-            end
-            ImGui.EndCombo()
-        end
-
-        resultvar = nil
-        if ImGui.BeginCombo("Subscription Level", mqFacade.GetSubscriptionLevel()) then
-            for i, j in pairs(subscription_levels) do
-                if bykey then
-                    if ImGui.Selectable(i, i == resultvar) then
-                        resultvar = i
-                    end
-                else
-                    if ImGui.Selectable(j, j == resultvar) then
-                        resultvar = j
-                    end
-                end
-            end
-            if (resultvar ~= nil) then
-                mqFacade.SetSubscriptionLevel(resultvar)
-            end
-            ImGui.EndCombo()
-        end
+        ComboSelectString("Subscription Level", mqFacade.GetSubscriptionLevel(), subscription_levels, function(sel)
+            mqFacade.SetSubscriptionLevel(sel)
+        end)
 
         ImGui.Separator()
 
@@ -1349,3 +1364,4 @@ function RenderTestTab()
 end
 
 return actions
+
