@@ -388,6 +388,9 @@ function RunCompleteCycle()
 	UpdateTimers()				if Aborting then return end
 	ParseQuestRotationTime()	if Aborting then return end
 
+	-- Schedule collect statistics after each completed cycle
+	CollectAgentStatistics()
+
 	local nextCheck = math.min(MinutesUntilNextQuest, math.floor(SecondsUntilNextRotation / 60))
 	if nextCheck >= 0 then
 		logger.warning('*** ' .. nextCheck .. ' minutes until next overseer check.  ' .. os.date('(%H:%M:%S)', os.time()))
@@ -399,8 +402,6 @@ function RunCompleteCycle()
 	if (Settings.General.campAfterFullCycle) then
 		CampCharacterToDesktop()
 	end
-	-- Schedule collect statistics after each completed cycle
-	CollectAgentStatistics()
 end
 
 function PreviewGeneralQuestList()
@@ -535,26 +536,17 @@ local function collect_specific_reward(rewardName, wait_for_reward_delay_ms)
 	return CollectSpecificReward(rewardItem, rewardIndex, false, nil)
 end
 
+-- Claim completed missions and then claim rewards (always attempts to collect)
 local function claim_missions_and_rewards()
 	OpenOverseerWindow()
-	logger.warning('\agClaiming \awCompleted Missions \atthen \awRewards \atas available')
+	logger.warning('Claiming Completed Missions and Rewards As Appropriate')
 	ChangeTab(3)
 
 	::process_next::
 	local claim_quest_result = EnumerateActiveQuests(true)
 	if (claim_quest_result ~= nil) then
-		-- Only attempt to collect when MQ2Rewards currently lists this reward.
-		-- This avoids claiming stale or cross-character rewards.
-		local rewardItem, rewardIndex = find_specific_reward_by_name(claim_quest_result)
-		if (rewardItem and rewardIndex) then
-			collect_specific_reward(claim_quest_result, 3000)
-		else
-			logger.info('No pending reward found for %s; skipping claim.', tostring(claim_quest_result))
-		end
+		collect_specific_reward(claim_quest_result, 3000)
 		goto process_next
-	else
-		-- Informational: no completed missions available to claim right now
-		logger.info('No \awCompleted Missions \atto claim')
 	end
 
 	ActiveQuestListDirty = false
@@ -1052,14 +1044,7 @@ end
 	for optionIndex = 1, rewardOptionCount do
 		if Aborting then return ClaimReward_Skipped end
 		local rewardOptionName = Settings.Rewards[optionIndex]
-		if (rewardItem.Text() == nil) then return ClaimReward_Skipped end
-
-		-- ... earlier code that sets rewardItem, rewardIndex ...
-		local rname = (rewardItem and rewardItem.Text and rewardItem.Text()) or ''
-		if rname ~= '' and not has_active_quest_with_name(rname) then
-			logger.debug('Skipping reward not tied to an active Overseer quest: %s', tostring(rname))
-			goto nextRewardOption   -- ensure this matches the label used in your loop
-		end
+		
 
 		if (SkipRewardOption(rewardOptionName)) then goto nextRewardOption end
 
@@ -2863,4 +2848,5 @@ mq.event('NoPendingRewards', '#*#You currently do not have any pending rewards.#
 mq.event('ErrorGrantingReward', '#*#The system is currently unable to grant your reward for#*#', Event_ErrorGrantingRewards)
 
 return actions
+
 
