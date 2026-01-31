@@ -27,7 +27,8 @@ local data_dir = io_utils.get_lua_file_path('data') -- adjust if your utils diff
 local shared = data_dir .. '/overseer.db'
 local char = mq.TLO.Me.CleanName() or 'unknown'
 local dest = string.format("%s/overseer_%s.db", data_dir, char)
-
+logger.info("package.loaded['database'] = %s, package.loaded['overseer.database'] = %s",
+    tostring(package.loaded['database'] ~= nil), tostring(package.loaded['overseer.database'] ~= nil))
 -- Utility: copy file in chunks (portable)
 local function copy_file(src, dst)
   local inFile = io.open(src, "rb")
