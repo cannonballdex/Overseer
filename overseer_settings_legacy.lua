@@ -1,9 +1,9 @@
 --- @type Mq
 local mq = require('mq')
-local LIP = require('lib.LIP')
-local utils = require('utils.string_utils')
-local io = require('utils.io_utils')
-require('utils.persistence')
+local LIP = require('overseer.lib.LIP')
+local utils = require('overseer.utils.string_utils')
+local io = require('overseer.utils.io_utils')
+require('overseer.utils.persistence')
 
 local actions = {}
 
