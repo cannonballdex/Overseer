@@ -1,6 +1,6 @@
 --- @type Mq
 local mq = require('mq')
-local settings = require 'overseer.overseer_settings'
+local settings = require ('overseer.overseer_settings')
 
 local mqfacade = {}
 
