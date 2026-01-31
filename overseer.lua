@@ -460,7 +460,7 @@ local function collect_specific_reward(rewardName, wait_for_reward_delay_ms)
 	local rewardItem, rewardIndex = find_specific_reward_by_name(rewardName)
 	if (rewardItem == nil or rewardIndex == nil) then
 		if (wait_for_reward_delay_ms == nil or wait_for_reward_delay_ms <= 0) then
-			printf('\at REWARD NOT FOUND: %s', rewardName)
+			logger.error('\at REWARD NOT FOUND: %s', rewardName)
 			-- os.exit()
 			return ClaimReward_Skipped
 		end
