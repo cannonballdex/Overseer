@@ -7,8 +7,13 @@ local actions = {}
 local app_name = 'Overseer'
 local logLeader = '\ar[\ag'..app_name..'.lua\ar]\aw '
 
---- @type number
-local logLevel = 6
+--- Initialize log level:
+-- If Settings.General.logLevel already exists (saved preference), honor it.
+-- Otherwise default to Off (1) to avoid noisy trace output during startup.
+local logLevel = 1
+if type(_G.Settings) == 'table' and _G.Settings.General and type(_G.Settings.General.logLevel) == 'number' then
+    logLevel = _G.Settings.General.logLevel
+end
 
 function actions.get_log_level() return logLevel end
 
@@ -65,6 +70,21 @@ function actions.output_test_logs()
 	actions.info("Test Normal")
 	actions.debug("Test Debug")
 	actions.trace("Test Trace")
+end
+
+-- Alias common require names to ensure there's only one logger instance.
+local _aliases = {
+	'utils/logger',
+	'utils.logger',
+	'overseer.utils.logger',
+	'overseer/utils/logger',
+	'overseer.logger',
+	'overseer/logger',
+}
+for _, name in ipairs(_aliases) do
+	if not package.loaded[name] then
+		package.loaded[name] = actions
+	end
 end
 
 return actions
