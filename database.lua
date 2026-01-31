@@ -2,15 +2,23 @@ local mq = require('mq')
 local sqlite3 = require('lsqlite3')
 local logger = require('utils.logger')
 local io = require('utils.io_utils')
+
 -- add near the top of the file with other module-level locals
 local db -- explicit module-level DB handle
 local db_path -- store the filesystem path opened by Initialize()
 
-
-
-
 local actions = {}
 --local db = {}   -- <- This has to be commented out or it don't konw the correct type.
+
+-- Minimal SQL escaping helper to avoid unescaped quotes in interpolated SQL.
+-- This is intentionally small and non-invasive: it doubles single-quotes per
+-- SQLite string literal escaping rules (replace ' with '').
+local function sql_escape(val)
+    if val == nil then
+        return ''
+    end
+    return tostring(val):gsub("'", "''")
+end
 
 local function initialize()
     -- initialize expects db to be set by Initialize()
@@ -100,9 +108,10 @@ local function rollback_transaction()
     logger.trace("\agDB Transaction Rolled Back")
 end
 
-
 local overseerquests_upsert =
-'INSERT INTO OverseerQuests VALUES("%s", "%s", "%s", "%s", "%s", "%s", "%s", "%s", "%s", CURRENT_TIMESTAMP)  ON CONFLICT(name) DO UPDATE SET level=excluded.level, rarity=excluded.rarity, type=excluded.type, duration=excluded.duration, successRate=excluded.successRate, experience=excluded.experience, mercenaryAas=excluded.mercenaryAas, tetradrachms=excluded.tetradrachms, DateModified=excluded.DateModified;'
+"INSERT INTO OverseerQuests VALUES('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', CURRENT_TIMESTAMP) " ..
+"ON CONFLICT(name) DO UPDATE SET level=excluded.level, rarity=excluded.rarity, type=excluded.type, duration=excluded.duration, " ..
+"successRate=excluded.successRate, experience=excluded.experience, mercenaryAas=excluded.mercenaryAas, tetradrachms=excluded.tetradrachms, DateModified=excluded.DateModified;"
 
 function actions.GetQuestDetails(questName)
     if not db then
@@ -110,8 +119,9 @@ function actions.GetQuestDetails(questName)
         return nil
     end
 
-    local sql = string.format('select * from OverseerQuests where name="%s";', questName)
-
+    -- Escape quest name to avoid embedded single-quotes breaking SQL
+    local safe_name = sql_escape(questName)
+    local sql = string.format("select * from OverseerQuests where name='%s';", safe_name)
     logger.trace('DB: GetQuestDetails: '.. sql)
     for x in db:nrows(sql) do
         return to_quest_model(x)
@@ -128,7 +138,20 @@ function actions.UpdateQuestDetails(questName, quest)
 
     start_transaction()
 
-    local sql = string.format(overseerquests_upsert, questName, quest.level, quest.rarity, quest.type, quest.duration, quest.successRate, quest.experience, quest.mercenaryAas, quest.tetradrachms)
+    -- Escape all values to prevent malformed SQL / injection
+    local q_name = sql_escape(questName)
+    local q_level = sql_escape(quest.level)
+    local q_rarity = sql_escape(quest.rarity)
+    local q_type = sql_escape(quest.type)
+    local q_duration = sql_escape(quest.duration)
+    local q_successRate = sql_escape(quest.successRate)
+    local q_experience = sql_escape(quest.experience)
+    local q_mercenaryAas = sql_escape(quest.mercenaryAas)
+    local q_tetradrachms = sql_escape(quest.tetradrachms)
+
+    local sql = string.format(overseerquests_upsert,
+        q_name, q_level, q_rarity, q_type, q_duration, q_successRate, q_experience, q_mercenaryAas, q_tetradrachms)
+
     logger.trace('DB: UpdateQuestDetails: '.. sql)
     if (db:exec(sql) ~= 0) then
         rollback_transaction()
@@ -192,8 +215,9 @@ function actions.Initialize()
 
     return db
 end
--- near the end of the file, before `return actions`, add:
+
 function actions.GetDbPath()
     return db_path
 end
+
 return actions
