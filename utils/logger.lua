@@ -8,7 +8,7 @@ local app_name = 'Overseer'
 local logLeader = '\ar[\ag'..app_name..'.lua\ar]\aw '
 
 --- @type number
-local logLevel = 4
+local logLevel = 6
 
 function actions.get_log_level() return logLevel end
 
