@@ -1,6 +1,6 @@
--- ******************************************************
--- * Overseer.lua.  Version 5.0
--- ******************************************************
+-- ****************************************************************
+-- * Overseer.lua.  Version 5.0 Heavly refractored by Cannonballdex
+-- ****************************************************************
 
 local mq = require('mq')
 local mqfacade = require('mq_facade')
@@ -8,9 +8,9 @@ local string_utils = require('utils/string_utils')
 local mqutils = require('utils/mq_utils')
 local logger = require('utils/logger')
 local json_file = require('utils/json_file')
-local db = require('database')
+local db = require('overseer.database')
 local utils = require('utils.utils')
-
+local _db_path_logged = false
 local actions = {}
 
 --- @type boolean
@@ -1288,10 +1288,22 @@ function LoadAvailableQuests(loadExtraData)
 
 	AvailableQuestCount = AvailableQuestCount + 1
 
-	if (Settings.General.useQuestDatabase == true) then
-		-- LOAD FROM DB.  i.e. "Do we already know about this one"
-		current_quest = db.GetQuestDetails(questName)
+	 if (Settings.General.useQuestDatabase == true) then
+    -- LOAD FROM DB.  i.e. "Do we already know about this one"
+    logger.trace("\aoDB: \ayQuerying for quest details: %s", tostring(questName))
+
+	-- Log DB path once, on first actual DB use
+	if not _db_path_logged and db and type(db.GetDbPath) == 'function' then
+		local p = db.GetDbPath()
+		if p and p ~= '' then
+			logger.info("Using DB file for queries: %s", tostring(p))
+		end
+		_db_path_logged = true
+	end
+
+	current_quest = db.GetQuestDetails(questName)
 		if (current_quest ~= nil) then
+			logger.trace("\agDB: \ayFound quest in DB: %s (exp=%s, type=%s)", tostring(current_quest.name), tostring(current_quest.experience), tostring(current_quest.type))
 			AllAvailableQuests[AvailableQuestCount] = current_quest
 			current_quest.available = true
 			database_exp_amount = current_quest.experience
@@ -1299,6 +1311,8 @@ function LoadAvailableQuests(loadExtraData)
 			if (not Settings.Debug.validateQuestRewardData) then
 				goto doneWithThisNode
 			end
+		else
+			logger.trace("\arDB: No record for quest\at '%s'", tostring(questName))
 		end
 	end
 
@@ -1791,73 +1805,110 @@ function ProcessConversionQuest(priority)
 end
 
 function SelectNextDuplicateAgent(priority)
-	-- Wait for UI to load
-	mq.delay(500)
-	local amount
-	local agentCountForConversion = 2
+    -- Wait for UI to load
+    mq.delay(500)
 
-	if (priority == 1) then agentCountForConversion = Settings.General.agentCountForConversionCommon
-	elseif (priority == 2) then agentCountForConversion = Settings.General.agentCountForConversionUncommon
-	elseif (priority == 3) then agentCountForConversion = Settings.General.agentCountForConversionRare end
+    local agentCountForConversion = 2
+    if (priority == 1) then
+        agentCountForConversion = Settings.General.agentCountForConversionCommon
+    elseif (priority == 2) then
+        agentCountForConversion = Settings.General.agentCountForConversionUncommon
+    elseif (priority == 3) then
+        agentCountForConversion = Settings.General.agentCountForConversionRare
+    end
 
-	local result = mq.TLO.Window(MinionSelectionScreen).FirstChild.Next
-	if (result == nil) then
-		return false
-	end
+    -- preserve original early-exit behavior if there's no next node
+    local ok_res, result = pcall(function() return mq.TLO.Window(MinionSelectionScreen).FirstChild.Next end)
+    if not ok_res or result == nil then
+        return false
+    end
 
-	local NODE = mq.TLO.Window(MinionSelectionScreenFirstMinion).FirstChild
-	if (NODE == nil or NODE.Siblings() == false) then return false end
-	NODE = NODE.Next
+    local ok_node, firstNode = pcall(function() return mq.TLO.Window(MinionSelectionScreenFirstMinion).FirstChild end)
+    if not ok_node or firstNode == nil then
+        return false
+    end
 
-	::nextAgent::
-	-- Add nil checks here
-	if (NODE == nil or tostring(NODE) == "NULL") then
-		logger.error("SelectNextDuplicateAgent: NODE is nil, returning false")
-		return false
-	end
+    -- If Siblings() explicitly returns false, bail (same as original)
+    local ok_sib, sib_val = pcall(function()
+        if firstNode and firstNode.Siblings then
+            if type(firstNode.Siblings) == "function" then
+                return firstNode:Siblings()
+            else
+                return firstNode.Siblings
+            end
+        end
+        return nil
+    end)
+    if ok_sib and sib_val == false then
+        return false
+    end
 
-	local minionButton = NODE.Child('OW_OQP_MinionNameBtn')
-	if (minionButton == nil or tostring(minionButton) == "NULL") then
-		logger.error("SelectNextDuplicateAgent: minionButton is nil")
-		goto nextAgentOrReturn
-	end
+    -- start from the first "Next" node
+    local ok_next, tmpNext = pcall(function() return firstNode.Next end)
+    if not ok_next or tmpNext == nil then
+        return false
+    end
+    local NODE = tmpNext
 
-	if (minionButton.Enabled ~= nil and minionButton.Enabled()) then
-		-- Add nil check for count label
-		local countLabel = NODE.Child('OW_OQP_MinionCountLabel')
-		if (countLabel == nil or tostring(countLabel) == "NULL" or countLabel.Text == nil) then
-			logger.error("SelectNextDuplicateAgent: count label is nil")
-			goto nextAgentOrReturn
-		end
+    -- Iterate nodes (replaces goto-based loop)
+    while NODE and tostring(NODE) ~= "NULL" do
+        -- safe child lookup for the minion name button
+        local ok_mb, minionButton = pcall(function()
+            if NODE and NODE.Child then return NODE:Child('OW_OQP_MinionNameBtn') end
+            return nil
+        end)
 
-		amount = string.sub(countLabel.Text(), 2)
+        if ok_mb and minionButton and tostring(minionButton) ~= "NULL" then
+            local ok_enabled, enabled = pcall(function()
+                return (minionButton.Enabled and minionButton.Enabled()) or false
+            end)
 
-		-- Add nil check for minion name
-		if (minionButton.Text == nil) then
-			logger.error("SelectNextDuplicateAgent: minionButton.Text is nil")
-			goto nextAgentOrReturn
-		end
+            if ok_enabled and enabled then
+                -- safe count label access
+                local ok_cl, countLabel = pcall(function()
+                    if NODE and NODE.Child then return NODE:Child('OW_OQP_MinionCountLabel') end
+                    return nil
+                end)
 
-		local minionName = minionButton.Text()
-		if (tonumber(amount) and tonumber(amount) > agentCountForConversion) then
-			local result2 = FailedQuest_IsExcludedAgent(minionName)
-			if (result2) then
-				logger.info('...ignoring excluded agent \ay%s', minionName)
-			else
-				mqutils.leftmouseup(minionButton.LeftMouseUp)
-				FailedQuest_AddMinionToCurrentPendingCache(minionName)
-				return true
-			end
-		end
-	end
+                if ok_cl and countLabel and tostring(countLabel) ~= "NULL" then
+                    local ok_text, countText = pcall(function()
+                        if type(countLabel.Text) == "function" then return countLabel:Text() end
+                        return countLabel.Text
+                    end)
 
-	::nextAgentOrReturn::
-	if (NODE ~= nil and NODE.Siblings()) then
-		NODE = NODE.Next
-		goto nextAgent
-	end
+                    if ok_text and countText then
+                        local amount = string.sub(tostring(countText), 2)
 
-	return false
+                        local ok_name, minionName = pcall(function()
+                            if type(minionButton.Text) == "function" then return minionButton:Text() end
+                            return minionButton.Text
+                        end)
+
+                        if ok_name and minionName and tonumber(amount) and tonumber(amount) > agentCountForConversion then
+                            local ok_excl, result2 = pcall(function() return FailedQuest_IsExcludedAgent(minionName) end)
+                            if ok_excl and result2 then
+                                logger.info('...ignoring excluded agent \ay%s', minionName)
+                            else
+                                pcall(function() mqutils.leftmouseup(minionButton.LeftMouseUp) end)
+                                pcall(function() FailedQuest_AddMinionToCurrentPendingCache(minionName) end)
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Advance to next node. Try to use Next regardless of Siblings presence to avoid errors.
+        local ok_n, nxt = pcall(function() return NODE.Next end)
+        if ok_n and nxt then
+            NODE = nxt
+        else
+            break
+        end
+    end
+
+    return false
 end
 
 function ProcessConversion(priority, name)
@@ -2854,6 +2905,3 @@ mq.event('NoPendingRewards', '#*#You currently do not have any pending rewards.#
 mq.event('ErrorGrantingReward', '#*#The system is currently unable to grant your reward for#*#', Event_ErrorGrantingRewards)
 
 return actions
-
-
-
