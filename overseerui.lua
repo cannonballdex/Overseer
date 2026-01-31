@@ -8,7 +8,6 @@ local settings = require('overseer.overseer_settings')
 local logger = require('overseer.utils.logger')
 local tests = require('overseer.tests.string_utils_tests')
 local string_utils = require('overseer/utils/string_utils')
-local utils = require('utils.utils')
 local icons = require('mq.Icons')
 
 -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
@@ -286,7 +285,7 @@ function RenderGeneralTab()
         -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
         local was_claims_open = claims_section_open
         local is_claims_open = ImGui.CollapsingHeader('Overseer Claims (Inventory)')
-        claims_section_open = is_claims_open
+        claims_section_open = is_claims_open or false
 
         -- If the user just collapsed the section, shrink the whole window.
         -- If they just expanded it, restore a larger window.
@@ -461,9 +460,7 @@ function RenderSettingsGeneralTab()
                 if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
                 if (changed) then settings.SaveSettings() end
                                 ImGui.SameLine()
-            if ImGui.Button'Mass Convert Elite' then
-                mq.cmdf('/overseermassconvert elite %s', Settings.General.agentCountForConversionElite)
-            end
+                uiutils.add_icon_action_button(icons.MD_TRANSFER_WITHIN_A_STATION, 'Retire Elite Agents##retireElite2', 'RetireEliteAgents','Retire Elite Agents')
                 ImGui.Unindent(20)
             end
         end
@@ -1120,34 +1117,7 @@ end
 
 local agent_show_type = 1
 
-local function render_stats_agents_rarity(row)
-    if (AgentStatisticCounts[row] == nil) then return end
-    local rarityDisplay = AgentStatisticCounts[row][2]
-    local rarity = string.lower(rarityDisplay)
 
-    ImGui.TableNextRow()
-    ImGui.TableNextColumn()
-    ImGui.Text(string.format('%s', rarityDisplay))
-    ImGui.TableNextColumn()
-    if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-        local itemValue = AgentStatisticSpecificCounts[rarity].count
-        ImGui.Text(itemValue)
-    end
-    ImGui.TableNextColumn()
-    if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-        local itemValue = AgentStatisticSpecificCounts[rarity].countHave
-        if (itemValue ~= nil) then
-            ImGui.Text(itemValue)
-        end
-    end
-    ImGui.TableNextColumn()
-    if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-        local itemValue = AgentStatisticSpecificCounts[rarity].countDuplicates
-        if (itemValue ~= nil) then
-            ImGui.Text(itemValue)
-        end
-    end
-end
 
 function RenderStatsTab()
     if ImGui.BeginTabItem("Stats") then
@@ -1195,33 +1165,34 @@ function RenderStatsTab()
             ImGui.TableNextColumn()
             uiutils.text_colored(TextStyle.TableColHeader, 'Duplicates')
 
+            local agentCounts = AgentStatisticCounts
+            local specificCounts = AgentStatisticSpecificCounts
+
             for row = 4, 1, -1 do
-                if (AgentStatisticCounts[row] ~= nil) then
+                if (agentCounts[row] ~= nil) then
                     ImGui.TableNextRow()
                     for col = 2, 5 do
                         ImGui.TableNextColumn()
-                        local rarity = string.lower(AgentStatisticCounts[row][2])
+                        local rarity = string.lower(agentCounts[row][2])
+                        local specific = (specificCounts ~= nil) and specificCounts[rarity] or nil
+
                         if (col == 3) then
-                            if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-                                local itemValue = AgentStatisticSpecificCounts[rarity].count
-                                ImGui.Text(itemValue)
+                            if specific then
+                                local itemValue = specific.count
+                                ImGui.Text(tostring(itemValue or ""))
                             end
                         elseif (col == 4) then
-                            if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-                                local itemValue = AgentStatisticSpecificCounts[rarity].countHave
-                                if (itemValue ~= nil) then
-                                    ImGui.Text(itemValue)
-                                end
+                            if specific then
+                                local itemValue = specific.countHave
+                                ImGui.Text(tostring(itemValue or ""))
                             end
                         elseif (col == 5) then
-                            if (AgentStatisticSpecificCounts ~= nil and AgentStatisticSpecificCounts[rarity] ~= nil) then
-                                local itemValue = AgentStatisticSpecificCounts[rarity].countDuplicates
-                                if (itemValue ~= nil) then
-                                    ImGui.Text(itemValue)
-                                end
+                            if specific then
+                                local itemValue = specific.countDuplicates
+                                ImGui.Text(tostring(itemValue or ""))
                             end
                         else
-                            ImGui.Text(string.format('%s', AgentStatisticCounts[row][col]))
+                            ImGui.Text(string.format('%s', agentCounts[row][col]))
                         end
                     end
                 end
@@ -1412,5 +1383,3 @@ function RenderTestTab()
 end
 
 return actions
-
-
