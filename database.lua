@@ -1,7 +1,7 @@
 local mq = require('mq')
 local sqlite3 = require('lsqlite3')
-local logger = require('utils.logger')
-local io = require('utils.io_utils')
+local logger = require('overseer.utils.logger')
+local io = require('overseer.utils.io_utils')
 
 -- add near the top of the file with other module-level locals
 local db -- explicit module-level DB handle
