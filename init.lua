@@ -17,10 +17,10 @@ local db = require('overseer.database')
 local settings = require 'overseer.overseer_settings'
 local overseer = require 'overseer.overseer'
 local ui = require 'overseer.overseerui'
-local logger = require('utils/logger')
+local logger = require('overseer.utils.logger')
 require 'overseer.overseer_settings_commands'
 local lfs = require('lfs')
-local io_utils = require('utils.io_utils') -- if present, otherwise build path manually
+local io_utils = require('overseer.utils.io_utils') -- if present, otherwise build path manually
 local mq = require('mq')
 
 local data_dir = io_utils.get_lua_file_path('data') -- adjust if your utils differ
