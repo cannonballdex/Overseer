@@ -3,13 +3,13 @@
 -- ****************************************************************
 
 local mq = require('mq')
-local mqfacade = require('mq_facade')
-local string_utils = require('utils/string_utils')
-local mqutils = require('utils/mq_utils')
-local logger = require('utils/logger')
-local json_file = require('utils/json_file')
+local mqfacade = require('overseer.mq_facade')
+local string_utils = require('overseer.utils.string_utils')
+local mqutils = require('overseer.utils/mq_utils')
+local logger = require('overseer.utils.logger')
+local json_file = require('utils.json_file')
 local db = require('overseer.database')
-local utils = require('utils.utils')
+local utils = require('overseer.utils.utils')
 local _db_path_logged = false
 local actions = {}
 
@@ -2214,7 +2214,7 @@ function OpenRewardWindow()
 	if (rewardWindow.Open() == true) then return true end
 
 	if (NoPendingRewards == false) then
-		logger.error('Unable to open RewardSelectionWnd.')
+		logger.error('No Pending Rewards. Unable to open RewardSelectionWnd.')
 	end
 
 	return false
