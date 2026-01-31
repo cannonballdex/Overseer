@@ -1347,13 +1347,19 @@ function LoadAvailableQuests(loadExtraData)
 		end
 	end
 
-	-- If we're in validation mode, log it (to screen) but do not save.
-	if (Settings.Debug.validateQuestRewardData and database_exp_amount ~= nil and database_exp_amount ~= current_quest.experience) then
-		logger.error('\ar EXP VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
-		logger.error('    \at Not updating database at all for this quest.')
-	elseif (database_exp_amount == nil and Settings.Debug.processFullQuestRewardData == true) then
-		db.UpdateQuestDetails(questName, current_quest)
-	end
+	-- if DB has an entry and values differ:
+	-- Updated validation/update handling:
+if (Settings.Debug.validateQuestRewardData and database_exp_amount ~= nil and database_exp_amount ~= current_quest.experience) then
+    logger.error('\ar EXP VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
+    if Settings.Debug.updateQuestDatabaseOnValidate then
+        logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
+        db.UpdateQuestDetails(questName, current_quest)
+    else
+        logger.error('    \at Not updating database at all for this quest.')
+    end
+elseif (database_exp_amount == nil and Settings.Debug.processFullQuestRewardData == true) then
+    db.UpdateQuestDetails(questName, current_quest)
+end
 
 	::doneWithThisNode::
 	if (NODE.Siblings()) then
