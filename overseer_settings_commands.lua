@@ -1,7 +1,7 @@
 --- @type Mq
 local mq = require('mq')
-local settings = require 'overseer_settings'
-local overseer = require 'overseer.overseer'
+local settings = require ('overseer_settings')
+local overseer = require ('overseer.overseer')
 
 local actions = {}
 
