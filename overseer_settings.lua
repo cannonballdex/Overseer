@@ -727,6 +727,8 @@ local function initialize(turn_off_autorun_settings)
 	logger.warning('v. \at%s\ax   Configuration: \at%s\ax', Version, MyIni)
 
 	EnsureIniDefaults_VersionUpdates()
+	-- sync persisted allowTestMode into runtime flag
+	actions.InTestMode = (Settings.Debug and Settings.Debug.allowTestMode) and true or false
 
 	StopOnMaxMercAA = Settings.General.stopOnMaxMercAA
 
@@ -735,7 +737,11 @@ local function initialize(turn_off_autorun_settings)
 	DebugNoRunQuestMode = Settings.Debug.doNotRunQuests
 	DebugNoSelectAgents = Settings.Debug.doNotFindAgents
 	mqutils.set_delays(Settings.General.uiActions.useUiActionDelay, Settings.General.uiActions.delayMinMs, Settings.General.uiActions.delayMaxMs)
-
+	Settings.Debug = Settings.Debug or {}
+	Settings.Debug.processFullQuestRewardData = Settings.Debug.processFullQuestRewardData or false
+	Settings.Debug.validateQuestRewardData = Settings.Debug.validateQuestRewardData or false
+	-- NEW: allow updates on validation mismatches when true (default: false)
+	Settings.Debug.updateQuestDatabaseOnValidate = Settings.Debug.updateQuestDatabaseOnValidate or false
 	load_achievement_quests()
 	load_settings_temp()
 
