@@ -1,6 +1,6 @@
 --- @type Mq
 local mq = require('mq')
-local logger = require('utils.logger')
+local logger = require('overseer.utils.logger')
 
 local actions = {}
 local useDelay = false
