@@ -1,4 +1,3 @@
--- Minimized & hardened version of overseer settings
 --- @type Mq
 local mq = require('mq')
 local utils = require('utils.string_utils')
@@ -11,16 +10,20 @@ require('utils.persistence')
 
 local actions = {}
 
-local Version = '3.78'
+local Version = 'Beta 5.0'
 local MyIni = 'Overseer.lua'
 
 actions.InTestMode = false
+
 --- @type boolean
 actions.Initialized = false
+
 --- @type string
 actions.AllQuestTypes = legacyConfig.AllQuestTypes
 
 -- Identifies character script was run against.
+-- 'Settings.General.onCharacterChange' specifies whether we reload on each change
+-- or pause and wait for that character to return
 --- @type string
 TrackingCharacter = ''
 
@@ -32,63 +35,87 @@ actions.ConfigurationSource = ''
 
 SettingsTemp = {}
 
--- Helper: safe persistence save (guards MyIniPath / persistence availability)
 function actions.SaveSettings()
-	if not MyIniPath or type(persistence) ~= 'table' or type(persistence.store) ~= 'function' then return end
 	persistence.store(MyIniPath, Settings)
 end
 
--- Collection helpers (robust against nil / missing index)
-local function ensure_collection_index(collection)
-	if not collection then return nil end
-	collection.index = collection.index or 0
-	return collection
-end
+function ReorderCollectionUp(collection, index)
+	if (collection == nil or index < 2) then return index end
 
-local function ReorderCollectionUp(collection, index)
-	if not collection or not collection.index or index <= 1 or index > collection.index then return index end
-	collection[index], collection[index - 1] = collection[index - 1], collection[index]
+	local currentName = collection[index]
+	collection[index] = collection[index - 1]
+	collection[index - 1] = currentName
+
 	actions.SaveSettings()
+
 	return index - 1
 end
 
-local function ReorderCollectionDown(collection, index)
-	if not collection or not collection.index or index < 1 or index >= collection.index then return index end
-	collection[index], collection[index + 1] = collection[index + 1], collection[index]
+function ReorderCollectionDown(collection, index)
+	if (collection == nil or index > collection.index - 1) then return index end
+
+	local currentName = collection[index]
+	collection[index] = collection[index + 1]
+	collection[index + 1] = currentName
+
 	actions.SaveSettings()
+
 	return index + 1
 end
 
-local function AddCollectionItem(collection, name)
-	if not collection then return end
-	collection.index = (collection.index or 0) + 1
+function AddCollectionItem(collection, name)
+	if (collection == nil) then return end
+
+	collection.index = collection.index + 1
 	collection[collection.index] = name
+
 	actions.SaveSettings()
 end
 
-local function RemoveCollectionItem(collection, index)
-	if not collection or not collection.index or index < 1 or index > collection.index then return end
-	for i = index, collection.index - 1 do
-		collection[i] = collection[i + 1]
+function RemoveCollectionItem(collection, index)
+	if (collection == nil or index < 1 or index > collection.index) then return end
+
+	local last = collection.index - 1
+	for optionIndex = index, last do
+		collection[optionIndex] = collection[optionIndex + 1]
 	end
-	collection[collection.index] = nil
-	collection.index = collection.index - 1
+
+	collection[last + 1] = nil
+	collection.index = last
+
 	actions.SaveSettings()
 end
 
--- Exposed wrappers (preserve API)
-function actions.ReorderRewardUp(index) return ReorderCollectionUp(Settings.Rewards, index) end
-function actions.ReorderRewardDown(index) return ReorderCollectionDown(Settings.Rewards, index) end
-function actions.AddActiveReward(name) AddCollectionItem(Settings.Rewards, name) end
-function actions.RemoveActiveReward(index) RemoveCollectionItem(Settings.Rewards, index) end
-function actions.ReorderSpecifiedQuestsUp(index) return ReorderCollectionUp(Settings.SpecificQuests, index) end
-function actions.ReorderSpecifiedQuestsDown(index) return ReorderCollectionDown(Settings.SpecificQuests, index) end
+function actions.ReorderRewardUp(index)
+	return ReorderCollectionUp(Settings.Rewards, index)
+end
+
+function actions.ReorderRewardDown(index)
+	return ReorderCollectionDown(Settings.Rewards, index)
+end
+
+function actions.AddActiveReward(name)
+	AddCollectionItem(Settings.Rewards, name)
+end
+
+function actions.RemoveActiveReward(index)
+	RemoveCollectionItem(Settings.Rewards, index)
+end
+
+function actions.ReorderSpecifiedQuestsUp(index)
+	return ReorderCollectionUp(Settings.SpecificQuests, index)
+end
+
+function actions.ReorderSpecifiedQuestsDown(index)
+	return ReorderCollectionDown(Settings.SpecificQuests, index)
+end
 
 local function GetSpecificCollectionIndexByValue(collection, name)
-	if not collection or not collection.index then return -1 end
-	for i = 1, collection.index do
-		if collection[i] == name then return i end
+
+	for optionIndex = 0, collection.index do
+		if (name == collection[optionIndex]) then return optionIndex end
 	end
+
 	return -1
 end
 
@@ -97,10 +124,13 @@ local function HasSpecificQuest(collection, name)
 end
 
 function actions.AddSpecifiedQuest(name)
-	if not Settings.SpecificQuests then
-		Settings.SpecificQuests = { index = 0 }
+	if (Settings.SpecificQuests == nil) then
+		Settings.SpecificQuests = {}
+		Settings.SpecificQuests.index = 0
 	end
-	if HasSpecificQuest(Settings.SpecificQuests, name) then return end
+
+	if (HasSpecificQuest(Settings.SpecificQuests, name)) then return end
+
 	AddCollectionItem(Settings.SpecificQuests, name)
 end
 
@@ -108,58 +138,61 @@ function actions.RemoveSpecifiedQuest(index)
 	RemoveCollectionItem(Settings.SpecificQuests, index)
 end
 
--- EnsureExists returns true if already existed, false if created
+-- Returns true if item exists, or false if didn't and default created
 local function EnsureExists(section, key, default)
-	Settings[section] = Settings[section] or {}
-	if Settings[section][key] == nil then
+	if (Settings[section] == nil) then
+		Settings[section] = {}
+	end
+
+	if (Settings[section][key] == nil) then
 		Settings[section][key] = default
 		return false
 	end
+
 	return true
 end
 
--- has_item: used for splitting legacy pipe lists
 local function has_item(array, itemName)
-	if not array then return false end
-	for _, v in ipairs(array) do
-		if v == itemName then return true end
-	end
-	return false
+	if (not array) then return false end
+
+	local index = 0
+	repeat
+		index = index + 1
+		if (not array[index]) then
+			return false
+		end
+
+		if (array[index] == itemName) then
+			return true
+		end
+	until false
 end
 
--- concatenate helper: build legacy pipe-delimited strings
 local function concatenate(value, source, expected, isFirst)
-	if (not value or not expected or value ~= true) then return source, isFirst end
+	if(not value or not expected or value ~= true) then return source, isFirst end
+
 	if (not source or isFirst == true) then return expected, false end
-	return source .. '|' .. expected, false
+	return source..'|'..expected, false
 end
 
 local function get_questpriority_sections(priorityName)
 	local legacySectionName = "QuestPriority"
 	if (priorityName ~= "Default") then
-		legacySectionName = "QuestPriority_" .. priorityName
+		legacySectionName = "QuestPriority_"..priorityName
 	end
 	local old = Settings[legacySectionName]
-	if (old == nil) then
-		logger.error('** Legacy QuestPriority Group (%s) Not Found **', legacySectionName)
-		return nil, nil
-	end
+	if (old == nil) then logger.error('** Legacy QuestPriority Group (%s) Not Found **', legacySectionName) return nil, nil end
 
-	if (SettingsTemp.QuestPriorities == nil) then
-		logger.error('** Temp Settings Not Set**')
-		return nil, nil
-	end
+	if (SettingsTemp.QuestPriorities == nil) then logger.error('** Temp Settings Not Set**') return nil, nil end
 	local new = SettingsTemp.QuestPriorities[priorityName]
-	if (not new) then
-		logger.error('** QuestPriority Group Not Found **')
-		return nil, nil
-	end
+	if (not new) then logger.error('** QuestPriority Group Not Found **') return nil, nil end
 
 	return old, new
 end
 
 local function save_quest_priority_types(old, new)
 	if (not old or not new) then return end
+
 	local isFirst = true
 	old.Types = ""
 	old.Types, isFirst = concatenate(new.types.exploration, old.Types, "Exploration", isFirst)
@@ -175,6 +208,12 @@ end
 
 local function save_quest_priority_rarities(old, new)
 	if (not old or not new) then return end
+
+	-- if (new.rarities.elite and new.rarities.rare and new.rarities.uncommon and new.rarities.common and new.rarities.easy) then
+	-- 	old.Rarities = "Any"
+	-- 	return
+	-- end
+
 	local isFirst = true
 	old.Rarities = ""
 	old.Rarities, isFirst = concatenate(new.rarities.elite, old.Rarities, "Elite", isFirst)
@@ -186,9 +225,9 @@ end
 
 local function save_quest_priority_durations(old, new)
 	if (not old or not new) then return end
+
 	local isFirst = true
 	old.Durations = ""
-	old.Durations, isFirst = concatenate(new.durations.h3, old.Durations, "3h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h6, old.Durations, "6h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h12, old.Durations, "12h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h24, old.Durations, "24h", isFirst)
@@ -197,6 +236,7 @@ end
 
 local function save_quest_priority_levels(old, new)
 	if (not old or not new) then return end
+
 	local isFirst = true
 	old.Levels = ""
 	old.Levels, isFirst = concatenate(new.levels.level5, old.Levels, "5", isFirst)
@@ -208,6 +248,7 @@ end
 
 local function save_quest_priority_priorities(old, new)
 	if (not old or not new) then return end
+
 	local isFirst = true
 	old.Priorities = ""
 	old.Priorities, isFirst = concatenate(new.priorities.levels, old.Priorities, "Levels", isFirst)
@@ -218,6 +259,7 @@ end
 
 local function save_quest_general(old, new)
 	if (not old or not new) then return end
+
 	old.general = new.general
 end
 
@@ -225,13 +267,14 @@ local function load_settings_temp_questpriorities_item(legacySectionName, priori
 	if (legacySectionName == nil) then
 		legacySectionName = "QuestPriority"
 	else
-		legacySectionName = "QuestPriority_" .. legacySectionName
+		legacySectionName = "QuestPriority_"..legacySectionName
 	end
 
 	local old = Settings[legacySectionName]
 	if (old == nil) then return end
 
-	SettingsTemp.QuestPriorities = SettingsTemp.QuestPriorities or {}
+	-- TODO: SettingsTemp
+	if (SettingsTemp.QuestPriorities == nil) then SettingsTemp.QuestPriorities = {} end
 	SettingsTemp.QuestPriorities[priorityName] = {}
 	local new = SettingsTemp.QuestPriorities[priorityName]
 
@@ -253,7 +296,8 @@ local function load_settings_temp_questpriorities_item(legacySectionName, priori
 		harvesting = has_item(split, "Harvesting") or has_item(split, "Any"),
 	}
 
-	if (not old.Rarities) then split = nil else split = utils.split(old.Rarities, '|') end
+	if (not old.Rarities) then split = nil
+	else split = utils.split(old.Rarities, '|')	end
 	new.rarities = {
 		elite = has_item(split, "Elite") or has_item(split, "Any"),
 		rare = has_item(split, "Rare") or has_item(split, "Any"),
@@ -262,16 +306,17 @@ local function load_settings_temp_questpriorities_item(legacySectionName, priori
 		easy = has_item(split, "Easy") or has_item(split, "Any"),
 	}
 
-	if (not old.Durations) then split = nil else split = utils.split(old.Durations, '|') end
+	if (not old.Durations) then split = nil
+	else split = utils.split(old.Durations, '|')	end
 	new.durations = {
-		h3 = has_item(split, "3h") or has_item(split, "Any"),
 		h6 = has_item(split, "6h") or has_item(split, "Any"),
 		h12 = has_item(split, "12h") or has_item(split, "Any"),
 		h24 = has_item(split, "24h") or has_item(split, "Any"),
 		h36 = has_item(split, "36h") or has_item(split, "Any"),
 	}
 
-	if (not old.Levels) then split = nil else split = utils.split(old.Levels, '|') end
+	if (not old.Levels) then split = nil
+	else split = utils.split(old.Levels, '|')	end
 	new.levels = {
 		level1 = has_item(split, "1") or has_item(split, "Any"),
 		level2 = has_item(split, "2") or has_item(split, "Any"),
@@ -280,7 +325,8 @@ local function load_settings_temp_questpriorities_item(legacySectionName, priori
 		level5 = has_item(split, "5") or has_item(split, "Any"),
 	}
 
-	if (not old.Priorities) then split = nil else split = utils.split(old.Priorities, '|') end
+	if (not old.Priorities) then split = nil
+	else split = utils.split(old.Priorities, '|')	end
 	new.priorities = {
 		levels = has_item(split, "Levels") or has_item(split, "Any"),
 		durations = has_item(split, "Durations") or has_item(split, "Any"),
@@ -296,10 +342,14 @@ local function load_settings_temp_questpriorities()
 	if (Settings.General.useQuestPriorityGroups ~= nil) then
 		local index = 0
 		local ourSplit = utils.split(Settings.General.useQuestPriorityGroups, '|')
+
 		repeat
 			index = index + 1
 			local questPriorityGroup = ourSplit[index]
-			if (not questPriorityGroup) then return end
+			if (not questPriorityGroup) then
+				return
+			end
+
 			load_settings_temp_questpriorities_item(questPriorityGroup, questPriorityGroup)
 		until false
 	end
@@ -326,28 +376,28 @@ function actions.SaveGroupPrioritySettings(property, priorityName)
 end
 
 function actions.get_achievement_status(actual_achievement)
-	if not actual_achievement then return 'notdone' end
-	if actual_achievement.Completed() == true then return 'done' end
-
-	local count = actual_achievement.ObjectiveCount() or 0
-	for i = count, 1, -1 do
-		local actual_objective = actual_achievement.ObjectiveByIndex(i)
-		if actual_objective and actual_objective.Completed() == false then
-			return 'partial'
-		end
+	if (actual_achievement.Completed() == true) then
+		return 'done'
 	end
 
-	return 'notdone'
+	for objIndex = actual_achievement.ObjectiveCount(), 1, -1  do
+		local actual_objective = actual_achievement.ObjectiveByIndex(objIndex)
+		if (actual_objective.Completed() == false) then
+			return 'partial'
+		end
+
+		return 'notdone'
+	end
 end
 
 function actions.ForceRunCompletedAchievements_Changed()
-	if not Settings or not Settings.AchievementQuests then return end
+
 	for _, achievement_quest in pairs(Settings.AchievementQuests) do
 		if (Settings.General.ForceCompletedAchievementQuests) then
 			achievement_quest.run = true
 		else
-			local ok, actual_achievement = pcall(function() return mq.TLO.Achievement.Achievement(achievement_quest.id) end)
-			if ok and actual_achievement then
+			local actual_achievement = mq.TLO.Achievement.Achievement(achievement_quest.id)
+			if (actual_achievement ~= nil) then
 				local status = actions.get_achievement_status(actual_achievement)
 				if (status == 'done') then
 					achievement_quest.run = false
@@ -361,77 +411,72 @@ end
 
 local function load_achievement_quests()
 	local file = json_file.loadTable('data/achievement_quests.json')
-	if (file == nil) then
-		logger.error("AchievementQuests configuration file not found.")
-		return
-	end
-	if (file.achievements == nil) then
-		logger.error("Achievement quests do not exist in configuration file.")
-		return
-	end
+	if (file == nil) then logger.error("AchievementQuests configuration file not found.") return end
 
-	Settings.AchievementQuests = Settings.AchievementQuests or {}
-	local added = false
+	if (file.achievements == nil) then logger.error("Achievement quests do not exist in configuration file.") return end
+
+	if (Settings.AchievementQuests == nil) then Settings.AchievementQuests = {} end
 
 	for _, achievement_item in pairs(file.achievements) do
 		local existing_ach = Settings.AchievementQuests[achievement_item.name]
 		if (existing_ach == nil) then
 			logger.warning('ADDING new achievement: \ag%s\aw', achievement_item.name)
-			Settings.AchievementQuests[achievement_item.name] = {
+
+			local new_achievement = {
 				run = true,
 				id = achievement_item.id,
 				name = achievement_item.name
 			}
-			added = true
+			Settings.AchievementQuests[achievement_item.name] = new_achievement
 		end
-	end
 
-	if added then actions.SaveSettings() end
+		actions.SaveSettings()
+	end
 end
 
+-- This is a temporary process until we're fully migrated to this new system and get rid of the "Types=One|Two|Three"
+-- Will move to the legacy settings section after that happens
 local function load_settings_temp()
 	load_settings_temp_questpriorities()
 	actions.SaveSettings()
-end
-
-local function safe_tlo(fn, fallback)
-	local ok, res = pcall(fn)
-	if ok then return res end
-	return fallback
 end
 
 local function ensure_ini_defaults()
 	io.ensure_config_dir()
 
 	MyIniPath = io.get_config_file_path(MyIni)
-	if io.file_exists(MyIniPath) then
+	if (io.file_exists(MyIniPath)) then
+
 		local retryLeft = 20
 		repeat
 			Settings = persistence.load(MyIniPath)
-			if Settings ~= nil then
+
+			-- Too many characters loading at same time can cause issues. Retry
+			if (Settings ~= nil) then
 				retryLeft = 0
 			else
 				logger.info("Did not load global file.  Retrying.")
-				retryLeft = retryLeft - 1
+				retryLeft = retryLeft -1
 				mq.doevents()
 				mq.delay(500)
 			end
-		until retryLeft == 0
+		until(retryLeft == 0)
 
-		if Settings == nil then
+		if (Settings == nil) then
 			logger.error("Unable to load global file. Continuing with character settings.")
 		end
+
 	else
 		Settings = legacyConfig.load_legacy_global_configurations(MyIniPath)
 	end
 
-	-- Ensure at least minimal structure and persistence
-	if not Settings or not Settings.General or Settings.General.useCharacterConfigurations == nil then
+	if Settings == nil or Settings.General == nil or Settings.General.useCharacterConfigurations == nil then
 		Settings = {
 			General = {
 				useCharacterConfigurations = true
 			}
 		}
+
 		persistence.store(MyIniPath, Settings)
 	end
 
@@ -440,13 +485,16 @@ local function ensure_ini_defaults()
 
 	local globalConfigIsEmpty = false
 	if Settings.General.useCharacterConfigurations then
-		MyIni = string.format('Overseer_%s_%s.lua', safe_tlo(function() return mq.TLO.Me.CleanName() end, 'Unknown'), safe_tlo(function() return mq.TLO.Me.Class.ShortName() end, 'Unknown'))
+		MyIni = string.format('Overseer_%s_%s.lua', mq.TLO.Me.CleanName(), mq.TLO.Me.Class.ShortName())
 		MyIniPath = io.get_config_file_path(MyIni)
 
-		if not io.file_exists(MyIniPath) then
-			local test_pre_persona_ini = string.format('Overseer_%s.lua', safe_tlo(function() return mq.TLO.Me.CleanName() end, 'Unknown'))
+		-- THIS IS PORT LOGIC for Alternate Personaes
+		-- TODO: Move this to a dif't method for better readability
+		if (io.file_exists(MyIniPath) == false) then
+			local test_pre_persona_ini = string.format('Overseer_%s.lua', mq.TLO.Me.CleanName())
 			local test_pre_persona_ini_path = io.get_config_file_path(test_pre_persona_ini)
-			if io.file_exists(test_pre_persona_ini_path) then
+			if (io.file_exists(test_pre_persona_ini_path) == true) then
+				-- If we're here, then we have to just rename old file to new
 				io.rename(test_pre_persona_ini_path, MyIniPath)
 				logger.info('Migrating pre-AltPersona INI (\aw%s\ao) to post (\ag%s\ao)', test_pre_persona_ini, MyIni)
 			end
@@ -455,7 +503,7 @@ local function ensure_ini_defaults()
 		actions.ConfigurationType = "Character"
 		actions.ConfigurationSource = string.format("%s", MyIni)
 
-		if io.file_exists(MyIniPath) then
+		if (io.file_exists(MyIniPath)) then
 			Settings = persistence.load(MyIniPath)
 		else
 			io.ensure_config_dir()
@@ -469,7 +517,7 @@ local function ensure_ini_defaults()
 		end
 	end
 
-	if not Settings or not Settings.General or globalConfigIsEmpty then
+	if Settings == nil or Settings.General == nil or globalConfigIsEmpty then
 		Settings = {
 			General = {
 				version = legacyConfig.SettingsVersion,
@@ -487,8 +535,8 @@ local function ensure_ini_defaults()
 				ignoreRecoveryQuests = true,
 				countAgentsBetweenCycles = false,
 				maxLevelUseCurrentCap = true,
-				maxLevelForClaimingExpReward = safe_tlo(function() return mq.TLO.Me.MaxLevel() end, 255),
-				maxLevelPctForClaimingExpReward = 97,
+				maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel(),
+				maxLevelPctForClaimingExpReward = 95,
 				claimCollectionFragments = false,
 				claimAgentPacks = false,
 				claimTetradrachmPacks = false,
@@ -505,8 +553,7 @@ local function ensure_ini_defaults()
 				convertEliteAgents = false,
 				ForceCompletedAchievementQuests = false,
 				uiActions = {
-					useUiActionDelay = true,
-					useDelay = true,
+					useDelay = false,
 					delayMinMs = 1000,
 					delayMaxMs = 2000,
 				}
@@ -516,7 +563,7 @@ local function ensure_ini_defaults()
 			},
 			QuestPriority = {
 				Priorities = 'Levels|Durations|Rarities|Types',
-				Durations = '3h|6h|12h',
+				Durations = '6h|12h',
 				Rarities = 'Elite|Rare|Uncommon|Common|Easy',
 				Types = actions.AllQuestTypes,
 				Levels = '5|4|3|2|1',
@@ -543,51 +590,48 @@ local function ensure_ini_defaults()
 
 		persistence.store(MyIniPath, Settings)
 
-		SettingsTemp.QuestPriorities = SettingsTemp.QuestPriorities or {
-			Default = {
-				general = {
-					selectHighestExp = false,
+		if (SettingsTemp.QuestPriorities == nil) then
+			SettingsTemp.QuestPriorities = {
+				Default = {
+					general = {
+						selectHighestExp = false,
+					},
+					rarities = {
+						elite = true,
+						rare = true,
+						uncommon = true,
+						common = true,
+						easy = true,
+					},
+					durations = {
+						h36 = true,
+						h24 = true,
+						h12 = true,
+						h6 = true,
+					},
+					levels = {
+						level1 = true,
+						level2 = true,
+						level3 = true,
+						level4 = true,
+						level5 = true,
+					},
+					types = {
+						exploration = true,
+						diplomacy = true,
+						trade = true,
+						plunder = true,
+						military = true,
+						stealth = true,
+						research = true,
+						crafting = true,
+						harvesting = true,
+					},
 				},
-				rarities = {
-					elite = true,
-					rare = true,
-					uncommon = true,
-					common = true,
-					easy = true,
-				},
-				durations = {
-					h36 = true,
-					h24 = true,
-					h12 = true,
-					h6 = true,
-					h3 = true,
-				},
-				levels = {
-					level1 = true,
-					level2 = true,
-					level3 = true,
-					level4 = true,
-					level5 = true,
-				},
-				types = {
-					exploration = true,
-					diplomacy = true,
-					trade = true,
-					plunder = true,
-					military = true,
-					stealth = true,
-					research = true,
-					crafting = true,
-					harvesting = true,
-				},
-			},
-		}
+			}
+		end
 	end
 
-	-- Ensure global Settings reference for other modules
-	_G.Settings = Settings
-
-	-- restore behavior: set log level and ensure some debug flags exist
 	logger.set_log_level(Settings.General.logLevel)
 
 	EnsureExists('Debug', 'doNotRunQuests', false)
@@ -606,7 +650,7 @@ function actions.SetUiDelays()
 end
 
 local function initialize(turn_off_autorun_settings)
-	TrackingCharacter = string.format("%s (%s)", safe_tlo(function() return mq.TLO.Me.Name() end, 'Unknown'), safe_tlo(function() return mq.TLO.Me.Class.ShortName() end, 'Unknown'))
+	TrackingCharacter = string.format("%s (%s)", mq.TLO.Me.Name(), mq.TLO.Me.Class.ShortName())
 
 	MaxAllowedQuests = 5
 	AvailableQuestList = "OverseerWnd/OW_OQP_QuestList"
@@ -628,52 +672,56 @@ local function initialize(turn_off_autorun_settings)
 	NextQuestCompletion = 0
 	MinutesUntilNextQuest = 0
 
-	AllActiveQuests = {}
+	-- 1==quest name, 2==quest completion string (i.e. 1h:10m), 3==quest completion minutes (i.e. 102)
+	AllActiveQuests = {} -- [10,3]
 	for i = 1, 10 do
 		AllActiveQuests[i] = {
-			name = '',
-			timeRemainingString = '',
-			completionMinutes = ''
+			name = '',				-- 1
+			timeRemainingString = '',-- 2
+			completionMinutes = ''	-- 3
 		}
 	end
 	AllActiveQuestCount = 0
 
+	-- 1==is available. 2==quest name. 3=Duration. 4==difficulty (Entire String, i.e. 'Level 1 Common Recruitment'). 5==quest run order. 
+	-- 6==Success Rate. 7==Exp. 8==Tetra. 9==level. 10==Rarity (i.e. Common).11==type (i.e. Trade, Plunder, Recruitment)
 	AllAvailableQuests = {}
 	for i = 1, 40 do
 		AllAvailableQuests[i] = {
-			available = true,
-			name = '',
+			available = true,	-- 1
+			name = '',			-- 2
 			duration = '',
-			difficulty = 0,
+			difficulty = 0,		-- 4
 			runOrder = 0,
-			successRate = 0,
+			successRate = 0,	-- 6
 			experience = 0,
 			mercenaryAas = 0,
-			tetradrachms = 0,
-			level = 0,
-			rarity = 0,
-			type = 0
+			tetradrachms = 0,	-- 8
+			level = 0,			-- 9
+			rarity = 0,			-- 10
+			type = 0			-- 11
 		}
 	end
 	AvailableQuestCount = 0
 	AvailableQuestListLoaded = false
 
-	-- InitializeAgentCounts must exist elsewhere; keep call for behavior
 	InitializeAgentCounts()
 
-	QuestOrder = {}
+	-- 1=Name (i.e. Durations)  2=allItems (i.e. '6h|12h')  3=curIndex 4=currentItem (i.e. '6h')
+	QuestOrder = {} -- [4,6]
 	for i = 1, 4 do
 		QuestOrder[i] = {
-			name = '',
-			allItems = 0,
-			currentIndex = 0,
-			currentItem = 0
+			name = '',			-- 1
+			allItems = 0,		-- 2
+			currentIndex = 0,	-- 3
+			currentItem = 0		-- 4
 		}
 	end
 
+	-- Hopefully temporary while we sort out this silly bug
 	FailedQuest_InStartQuestBadAgentErrorMode = false
 	FailedQuest_CurrentPendingMinionCacheCount = 0
-	FailedQuest_CurrentPendingMinions = {}
+	FailedQuest_CurrentPendingMinions = {} -- [10]
 
 	ensure_ini_defaults()
 	logger.warning('v. \at%s\ax   Configuration: \at%s\ax', Version, MyIni)
@@ -681,6 +729,7 @@ local function initialize(turn_off_autorun_settings)
 	EnsureIniDefaults_VersionUpdates()
 
 	StopOnMaxMercAA = Settings.General.stopOnMaxMercAA
+
 	CountAgentsBetweenCycles = Settings.General.countAgentsBetweenCycles
 
 	DebugNoRunQuestMode = Settings.Debug.doNotRunQuests
@@ -702,7 +751,9 @@ local function initialize(turn_off_autorun_settings)
 			Settings.General.autoRestartEachCycle = false
 			is_dirty = true
 		end
-		if (is_dirty) then actions.SaveSettings() end
+		if (is_dirty) then
+			actions.SaveSettings()
+		end
 	end
 
 	actions.Initialized = true
@@ -712,14 +763,16 @@ function actions.InitializeOverseerSettings(turn_off_autorun_settings)
 	initialize(turn_off_autorun_settings)
 end
 
+
 function UpdateGlobalCharConfigurationSetting(value)
-	if Settings.General.useCharacterConfigurations == value then
+	if (Settings.General.useCharacterConfigurations == value) then
 		logger.info('Already Same Value')
 		return
 	end
 
-	if value then
+	if (value) then
 		logger.info('Already Using Global, so updating Global')
+		-- We're already using the global INI file.  Save it there
 		Settings.General.useCharacterConfigurations = value
 		persistence.store(MyIniPath, Settings)
 		return
@@ -727,11 +780,13 @@ function UpdateGlobalCharConfigurationSetting(value)
 
 	logger.info('Using char so updating Global.')
 
-	-- attempt to update a global INI if present (kept as placeholder)
+	-- In this case, we're using the character file and need to load the global
 	local config_dir = mq.configDir:gsub('\\', '/') .. '/'
 	local globalIniFileFullPath = config_dir .. 'OverseerLua.ini'
-	if io.file_exists(globalIniFileFullPath) then
-		-- legacy placeholder; preserved behavior
+	if (io.file_exists(globalIniFileFullPath)) then
+		-- local globalSettings = LIP.load(globalIniFileFullPath)
+		-- globalSettings.General.useCharacterConfigurations = value
+		-- LIP.save(globalIniFileFullPath, globalSettings)
 	end
 end
 
@@ -741,7 +796,6 @@ function UpdateSetting(section, property, value)
 end
 
 function actions.ApplySettingsTemp()
-	-- placeholder retained for compatibility
 end
 
 return actions
