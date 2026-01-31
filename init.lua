@@ -14,11 +14,11 @@ ensure_package('lsqlite3', 'lsqlite3')
 local sqlite3 = require('lsqlite3')
 --- @type Mq
 local db = require('overseer.database')
-local settings = require 'overseer.overseer_settings'
-local overseer = require 'overseer.overseer'
-local ui = require 'overseer.overseerui'
+local settings = require ('overseer.overseer_settings')
+local overseer = require ('overseer.overseer')
+local ui = require ('overseer.overseerui')
 local logger = require('overseer.utils.logger')
-require 'overseer.overseer_settings_commands'
+require ('overseer.overseer_settings_commands')
 local lfs = require('lfs')
 local io_utils = require('overseer.utils.io_utils') -- if present, otherwise build path manually
 local mq = require('mq')
@@ -27,8 +27,7 @@ local data_dir = io_utils.get_lua_file_path('data') -- adjust if your utils diff
 local shared = data_dir .. '/overseer.db'
 local char = mq.TLO.Me.CleanName() or 'unknown'
 local dest = string.format("%s/overseer_%s.db", data_dir, char)
-logger.info("package.loaded['database'] = %s, package.loaded['overseer.database'] = %s",
-    tostring(package.loaded['database'] ~= nil), tostring(package.loaded['overseer.database'] ~= nil))
+logger.info("package.loaded['overseer.database'] = %s", tostring(package.loaded['overseer.database'] ~= nil))
 -- Utility: copy file in chunks (portable)
 local function copy_file(src, dst)
   local inFile = io.open(src, "rb")
@@ -117,7 +116,6 @@ local function ensure_perchar_db()
   -- If per-character DB has greater-than OR EQUAL rows compared to shared DB, do not overwrite
   if dest_count >= shared_count then
     logger.info("Database is up to date (%s) has (%d) and main DB (%d) rows.", tostring(dest), dest_count, shared_count)
-    logger.debug("Per-character DB (%s) has (%d) and shared DB (%d) rows. Skipping copy to avoid data loss.", tostring(dest), dest_count, shared_count)
     return true
   end
 
@@ -156,6 +154,15 @@ if not initialized then
 end
 
 settings.InitializeOverseerSettings(no_run)
+-- Notify user about the active log level and how to change it for more verbosity.
+-- Always print so the message is visible even if logger level is low.
+do
+  local ok, lvl = pcall(function() return logger.get_log_level() end)
+  local level_str = (ok and lvl) and tostring(lvl) or "unknown"
+  local msg = string.format("\ar[\agOverseer.lua\ar]   \atYour current log level = %s. Control Verbose - Edit Log Level under Settings/General Tab.", level_str)
+
+  print(msg)
+end
 
 ui.InitializeUi(Settings.General and Settings.General.showUi)
 overseer.Main()
