@@ -10,8 +10,18 @@ local tests = require('overseer.tests.string_utils_tests')
 local string_utils = require('overseer/utils/string_utils')
 local utils = require('utils.utils')
 local icons = require('mq.Icons')
+
+-- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
 local claims_section_open = true
 local pending_window_size = nil
+
+-- Track collapse/expand state of agent sections (initialized true to match previous behavior)
+local agent_section_open = {
+    elite = true,
+    rare = true,
+    uncommon = true,
+    common = true,
+}
 
 local actions = {}
 
@@ -30,6 +40,18 @@ local cancelable_processes = {
     ['Running general quests'] = true,
     ['Generating quest preview list'] = true,
 }
+
+-- Safe printf fallback: prefer logger.info if available, otherwise print
+if printf == nil then
+  local function _safe_printf(fmt, ...)
+    if logger and logger.info then
+      logger.info(string.format(fmt, ...))
+    else
+      print(string.format(fmt, ...))
+    end
+  end
+  printf = _safe_printf
+end
 
 --- Helper combo that selects a string from an ordered list of options.
 -- on_select will be called with the selected string (not index) when user picks an entry.
@@ -74,6 +96,12 @@ function HideUi() SetWindowVisibleState(false) end
 
 function SetWindowVisibleState(show)
     MyShowUi = show
+    -- guard Settings.General existence
+    if not (Settings and Settings.General) then
+        -- store fallback or return early; prefer saving state once Settings is available
+        return
+    end
+
     if (Settings.General.showUi ~= MyShowUi) then
         if (MyShowUi) then
             logger.info('\aoShowing Overseer UI\ar')
@@ -256,39 +284,39 @@ function RenderGeneralTab()
 
         ImGui.Separator()
         -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
-local was_claims_open = claims_section_open
-local is_claims_open = ImGui.CollapsingHeader('Overseer Claims (Inventory)')
-claims_section_open = is_claims_open
+        local was_claims_open = claims_section_open
+        local is_claims_open = ImGui.CollapsingHeader('Overseer Claims (Inventory)')
+        claims_section_open = is_claims_open
 
--- If the user just collapsed the section, shrink the whole window.
--- If they just expanded it, restore a larger window.
-if (not is_claims_open and was_claims_open) then
-    -- user collapsed → minimize window. Adjust numbers to taste:
-    pending_window_size = { width = 300, height = 225 }
-elseif (is_claims_open and not was_claims_open) then
-    -- user expanded → restore to a larger size. Adjust to your preferred default:
-    pending_window_size = { width = 300, height = 375 }
-end
+        -- If the user just collapsed the section, shrink the whole window.
+        -- If they just expanded it, restore a larger window.
+        if (not is_claims_open and was_claims_open) then
+            -- user collapsed → minimize window. Adjust numbers to taste:
+            pending_window_size = { width = 300, height = 225 }
+        elseif (is_claims_open and not was_claims_open) then
+            -- user expanded → restore to a larger size. Adjust to your preferred default:
+            pending_window_size = { width = 300, height = 375 }
+        end
 
-if is_claims_open then
-    local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
-    if ImGui.BeginTable('##tableClaims', 2, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
-        ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-            -1.0, 0)
-        ImGui.TableSetupColumn('Value', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-            -1.0, 1)
-        
-        add_claim_table_row('Overseer Tetradrachms', mq.TLO.Me.OverseerTetradrachm())
-        add_claim_table_row('Dispenser Fragments', fragments)
-        add_claim_table_row('Ornamentation Dispensers', ornamentation)
-        add_claim_table_row('Collection Item Dispensers', collectionDispenser)
-        add_claim_table_row('Agent Packs', agent)
-        add_claim_table_row('Uncommon Agent Packs', agentUncommon)
-        add_claim_table_row('Elite Agent Echos', agentElite)
+        if is_claims_open then
+            local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
+            if ImGui.BeginTable('##tableClaims', 2, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
+                ImGui.TableSetupColumn('Name', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                    -1.0, 0)
+                ImGui.TableSetupColumn('Value', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
+                    -1.0, 1)
+                
+                add_claim_table_row('Overseer Tetradrachms', mq.TLO.Me.OverseerTetradrachm())
+                add_claim_table_row('Dispenser Fragments', fragments)
+                add_claim_table_row('Ornamentation Dispensers', ornamentation)
+                add_claim_table_row('Collection Item Dispensers', collectionDispenser)
+                add_claim_table_row('Agent Packs', agent)
+                add_claim_table_row('Uncommon Agent Packs', agentUncommon)
+                add_claim_table_row('Elite Agent Echos', agentElite)
 
-        ImGui.EndTable()
-    end
-end
+                ImGui.EndTable()
+            end
+        end
 
         ImGui.EndTabItem()
     end
@@ -1121,8 +1149,6 @@ local function render_stats_agents_rarity(row)
     end
 end
 
-local filterComboVisible = false
-
 function RenderStatsTab()
     if ImGui.BeginTabItem("Stats") then
         if (CurrentProcessName ~= "Initialze") then
@@ -1205,8 +1231,14 @@ function RenderStatsTab()
 
         ImGui.Text('')
 
-        filterComboVisible = false
+        -- Render filter combo once at the top so Elite will be immediately above Rare
+        ImGui.PushItemWidth(100)
+        agent_show_type, _ = ImGui.Combo('Filter##AgentFilter', agent_show_type or 1, 'All\0Have\0Missing\0')
+        ImGui.PopItemWidth()
 
+        ImGui.Text('')
+
+        -- Render agent detail sections in the desired order
         RenderSpecificAgentCountSection('Elite', agent_show_type)
         RenderSpecificAgentCountSection('Rare', agent_show_type)
         RenderSpecificAgentCountSection('Uncommon', agent_show_type)
@@ -1224,74 +1256,90 @@ function RenderSpecificAgentCountSection(name, showType)
         return
     end
 
-    if (filterComboVisible == false) then
-        ImGui.PushItemWidth(100)
-        agent_show_type, _ = ImGui.Combo('Filter', agent_show_type, 'All\0Have\0Missing\0')
+    -- ensure the table exists, then use the existing value or false
+    agent_section_open = agent_section_open or {}
+    local was_open = (agent_section_open[rarity] ~= nil) and agent_section_open[rarity] or false
 
-        filterComboVisible = true
+    local label = string.format('%s Agents', name)
+    -- Single call to CollapsingHeader (no duplicates)
+    local is_open = ImGui.CollapsingHeader(label)
+    agent_section_open[rarity] = is_open
+
+    -- Detect transitions and request a main window resize (applied in DrawMainWindow)
+    if (not is_open and was_open) then
+        pending_window_size = { width = 300, height = 425 }
+    elseif (is_open and not was_open) then
+        pending_window_size = { width = 500, height = 750 }
     end
+
+    if not is_open then
+        -- collapsed → nothing to render for this section
+        return
+    end
+
+    -- Use a unique table id per rarity to avoid ImGui ID collisions
+    local table_id = string.format('##tableAgentCounts_%s', rarity)
     local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter,
         ImGuiTableFlags.BordersInBody)
-    if ImGui.CollapsingHeader(string.format('%s Agents', name)) then
-        if ImGui.BeginTable('##tableEliteAgentCounts', 5, flags, 0, TEXT_BASE_HEIGHT * 5, 0.0) then
-            -- Declare columns
-            ImGui.TableSetupColumn('Agent', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-                -1.0, 0)
-            ImGui.TableSetupColumn('Count', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-                -1.0, 1)
-            ImGui.TableSetupColumn('Source', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-                -1.0, 3)
-            ImGui.TableSetupColumn('Retire', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-                -1.0, 2)
-            ImGui.TableSetupColumn('Padding', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto),
-                -1.0, 4)
-            ImGui.TableNextRow()
-            ImGui.TableNextColumn()
-            uiutils.text_colored(TextStyle.TableColHeader, 'Agent')
-            ImGui.TableNextColumn()
-            uiutils.text_colored(TextStyle.TableColHeader, 'Count')
-            ImGui.TableNextColumn()
-            -- TODO: Elite Retire
-            if (is_elite(rarity)) then
-                uiutils.text_colored(TextStyle.TableColHeader, 'Retire')
-            else
-                ImGui.Text('                 ')
-            end
-            ImGui.TableNextColumn()
-            uiutils.text_colored(TextStyle.TableColHeader, 'Source')
-            ImGui.TableNextColumn()
 
-            for item, value in pairs(AgentStatisticSpecificCounts[rarity].agents) do
-                if (showType == nil or showType == 1 or (showType == 2 and value.count > 0) or (showType == 3 and value.count <= 0)) then
-                    ImGui.TableNextRow()
-                    ImGui.TableNextColumn()
-                    ImGui.Text(item)
-                    ImGui.TableNextColumn()
+    if ImGui.BeginTable(table_id, 5, flags, 0, TEXT_BASE_HEIGHT * 5, 0.0) then
+        -- Declare columns
+        ImGui.TableSetupColumn('Agent', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0, 0)
+        ImGui.TableSetupColumn('Count', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0, 1)
+        ImGui.TableSetupColumn('Source', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0, 3)
+        ImGui.TableSetupColumn('Retire', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0, 2)
+        ImGui.TableSetupColumn('Padding', bit32.bor(ImGuiTableColumnFlags.NoSort, ImGuiTableColumnFlags.WidthAuto), -1.0, 4)
 
-                    if (is_elite(rarity) and Settings.General.agentCountForConversionElite ~= nil and value.count > Settings.General.agentCountForConversionElite) then
-                        ImGui.PushStyleColor(ImGuiCol.Text, 0.2, 0.8, 0.2, 1)
-                        ImGui.Text(value.count)
-                        ImGui.PopStyleColor(1)
-                    else
-                        ImGui.Text(value.count)
-                    end
-                    ImGui.TableNextColumn()
-                    -- TODO: Elite Retire
-                    if (is_elite(rarity) and value.count > 1) then
-                        uiutils.add_action_button(string.format('Retire##retire%s', item), 'RetireEliteAgent',
-                            'Retire Elite Agent', item)
-                    else
-                        ImGui.Text('                 ')
-                    end
-                    ImGui.TableNextColumn()
-                    if (value.source ~= nil) then
-                        ImGui.Text(value.source)
-                    end
-                    ImGui.TableNextColumn()
-                end
-            end
-            ImGui.EndTable()
+        ImGui.TableNextRow()
+        ImGui.TableNextColumn()
+        uiutils.text_colored(TextStyle.TableColHeader, 'Agent')
+        ImGui.TableNextColumn()
+        uiutils.text_colored(TextStyle.TableColHeader, 'Count')
+        ImGui.TableNextColumn()
+        if (is_elite(rarity)) then
+            uiutils.text_colored(TextStyle.TableColHeader, 'Retire')
+        else
+            ImGui.Text('                 ')
         end
+        ImGui.TableNextColumn()
+        uiutils.text_colored(TextStyle.TableColHeader, 'Source')
+        ImGui.TableNextColumn()
+
+        for item, value in pairs(AgentStatisticSpecificCounts[rarity].agents) do
+            if (showType == nil or showType == 1 or (showType == 2 and value.count > 0) or (showType == 3 and value.count <= 0)) then
+                ImGui.TableNextRow()
+                ImGui.TableNextColumn()
+                ImGui.Text(item)
+
+                ImGui.TableNextColumn()
+                if (is_elite(rarity) and Settings.General.agentCountForConversionElite ~= nil and value.count > Settings.General.agentCountForConversionElite) then
+                    ImGui.PushStyleColor(ImGuiCol.Text, 0.2, 0.8, 0.2, 1)
+                    ImGui.Text(value.count)
+                    ImGui.PopStyleColor(1)
+                else
+                    ImGui.Text(value.count)
+                end
+
+                ImGui.TableNextColumn()
+                -- Retire button id includes rarity and sanitized item to keep it unique
+                if (is_elite(rarity) and value.count > 1) then
+                    local safe_item = tostring(item):gsub('[^%w]', '_')
+                    uiutils.add_action_button(string.format('Retire##retire_%s_%s', rarity, safe_item), 'RetireEliteAgent',
+                        'Retire Elite Agent', item)
+                else
+                    ImGui.Text('                 ')
+                end
+
+                ImGui.TableNextColumn()
+                if (value.source ~= nil) then
+                    ImGui.Text(value.source)
+                end
+
+                ImGui.TableNextColumn()
+            end
+        end
+
+        ImGui.EndTable()
     end
 end
 
@@ -1364,4 +1412,5 @@ function RenderTestTab()
 end
 
 return actions
+
 
