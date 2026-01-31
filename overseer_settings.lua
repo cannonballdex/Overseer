@@ -1,12 +1,12 @@
 --- @type Mq
 local mq = require('mq')
-local utils = require('utils.string_utils')
-local io = require('utils.io_utils')
-local logger = require('utils.logger')
-local legacyConfig = require('overseer_settings_legacy')
-local json_file = require('utils.json_file')
-local mqutils = require('utils.mq_utils')
-require('utils.persistence')
+local utils = require('overseer.utils.string_utils')
+local io = require('overseer.utils.io_utils')
+local logger = require('overseer.utils.logger')
+local legacyConfig = require('overseer.overseer_settings_legacy')
+local json_file = require('overseer.utils.json_file')
+local mqutils = require('overseer.utils.mq_utils')
+require('overseer.utils.persistence')
 
 local actions = {}
 
