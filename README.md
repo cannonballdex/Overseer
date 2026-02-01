@@ -1,110 +1,227 @@
 # Overseer
 
-Overseer is a Lua-based MacroQuest plugin to manage quests, agents, and related UI tooling for EverQuest. It provides a settings system, persistent quest database (SQLite), an ImGui-based UI, and utilities for configuration and file handling.
+Overseer is a MacroQuest (MQ) Lua plugin that automates and monitors in-game quest rotation, reward collection, and optional local quest-data ingestion. It provides a configurable ImGui UI, a CLI for scripted control, and an optional local SQLite database to speed lookups and enable validation.
 
-Version: 5.0 Beta
+This README gives a practical overview, installation steps, usage examples, configuration guidance, safety notes about database writes, and development pointers.
 
-## Table of Contents
+---
 
-- [Features](#features)
-- [Status](#status)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick Start / Usage](#quick-start--usage)
-- [Configuration](#configuration)
-- [Database](#database)
-- [Testing](#testing)
-- [Development notes](#development-notes)
-- [Contributing](#contributing)
-- [License](#license)
+## Table of contents
+
+- Overview
+- Features
+- Requirements
+- Installation
+- Quick start
+- UI tour
+- CLI commands and examples
+- Important settings (what they do)
+- Database behavior & safety (must-read)
+- Logging & troubleshooting
+- Development & contributing
+- License
+
+---
+
+## Overview
+
+Overseer helps automate:
+- Periodic quest rotations and runs
+- Claiming quest rewards (configurable)
+- Selecting quests by priority (level/duration/rarity/type)
+- Optionally storing and validating known quest reward data in a local DB
+
+It is designed to be safe-by-default: DB writes and aggressive debug modes are opt-in and guarded to avoid accidental data corruption.
+
+---
 
 ## Features
 
-- Quest and agent management with statistics and ordering
-- Persisted quest database using SQLite
-- Settings with automatic migration from older formats
-- ImGui-based UI with controls and tools (including a "Run Unit Tests" button)
-- Utilities bundled: LIP (Lightweight INI Parser), rxi-json, argparse, io utilities
+- ImGui-based UI with multiple tabs: Status, Settings, Actions, Stats (plus Test when enabled)
+- Persistent settings per character or global (INI)
+- Optional SQLite DB of known quests (faster lookups, validation)
+- Test and validation modes to preview or ingest quest data
+- Logging at multiple levels including Trace for deep debugging
+- Command-line interface via `/mqoverseer` for automation and scripting
 
-## Status
-
-This repository is marked as "5.0 Beta". Core functionality appears implemented and includes settings migration logic and unit test hooks. The README is intentionally compact; see "Development notes" for items to consider improving.
+---
 
 ## Requirements
 
-- MacroQuest (mq) with Lua environment and ImGui integration
-- LuaJIT (for ffi) — typically provided by MacroQuest
-- lfs (LuaFileSystem) — the repo attempts to ensure this via the included PackageMan hook
-- lsqlite3 (lsqlite3 library) — used for persisting the quest database
-- Platform: Windows is expected (some code uses the Windows Kernel32 CreateDirectoryA via ffi)
+- MacroQuest (MQ) with Lua and ImGui support
+- The MQ Lua environment used by your setup (this project uses MQ's Lua + ImGui)
+- Optional: sqlite3 bindings if you plan to use the local DB features
 
-Note: The plugin's `init.lua` contains helper logic to `require` and install packages via `mq/PackageMan` if not present. In many cases those dependencies will be installed automatically when Overseer starts.
+---
 
 ## Installation
 
-Option A — Manual
-1. Place the `overseer` plugin files into your MacroQuest lua directory. Typical structure:
-   - <mq.luaDir>/overseer/*.lua
-   - <mq.luaDir>/overseer/lib/*
-   - <mq.luaDir>/overseer/utils/*
+1. Clone the repository into your MQ scripts directory:
+   - Example: `git clone https://github.com/cannonballdex/Overseer.git Overseer`
+2. Ensure any required Lua modules used by the repository are on MQ's Lua path.
+3. Start MacroQuest and run:
+   - `/lua run overseer` (or add to your auto-load scripts)
 
-2. Start MacroQuest and load the plugin (or restart MQ so it picks up Lua files).
+---
 
-Option B — PackageMan (if available)
-- Overseer attempts to auto-install `luafilesystem` and `lsqlite3` using `mq/PackageMan`. Ensure `PackageMan` is available in your MQ installation.
+## Quick start
 
-## Quick Start / Usage
+1. Start Overseer and open the UI.
+2. In the Settings tab -> General:
+   - Toggle "Load known quests from database" if you have a populated DB and want fast lookups.
+3. If you're only exploring, leave all DB-write debug options off (safe default).
+4. Use the Actions tab to run a full cycle (`Run Full Cycle`) or preview the next rotation.
+5. To inspect differences between live UI values and DB values, enable `Validate Quest Reward Data` (this is a dry-run unless you enable DB update flags).
 
-- Load Overseer via your usual MacroQuest Lua loading mechanism (e.g. placed in the MQ lua directory).
-- Open the UI to interact with Overseer (overseerui) — the UI exposes settings, database controls, and a "Run Unit Tests" button.
-- If the plugin cannot find dependencies it will try to install them via PackageMan. Check logs for output.
+---
 
-## Configuration
+## UI tour
 
-- Settings are stored and managed by `overseer_settings.lua` with migration support in `overseer_settings_legacy.lua`.
-- Default paths are computed in `utils/io_utils.lua`. Per-lua-file data directory is created underneath the MQ lua path, e.g.:
-  - data dir: `<mq.luaDir>/overseer/data`
+- Status (formerly General): shows next quest completion, rotation, character info, and common quick actions.
+- Settings: grouped sections for General, Rewards, Quest Priority, Debug/Test options.
+- Actions: run manual cycles, run unit tests, or trigger special flows.
+- Stats: runtime metrics and historical statistics.
+- Test: appears only when Test Mode is enabled and contains ingestion/validation controls.
 
-- Many settings are available via the UI. The code also exposes utility functions for reading/writing INI-style configuration via `lib/LIP.lua`.
+Note: ImGui allows tab reordering; you can drag the Status tab back to the first position or disable reordering in code.
 
-## Database
+---
 
-- Overseer persists known quests in a SQLite3 DB (via `lsqlite3`).
-- On startup the plugin will decide whether to copy a shared DB to a per-character DB based on row counts (see `init.lua` and the `get_quest_count`/`ensure_perchar_db` logic).
-- If you see errors opening the DB, ensure `lsqlite3` is installed and accessible to the MQ Lua environment.
+## CLI commands (examples)
 
-## Testing
+Overseer exposes multiple commands through `/mqoverseer`. A few useful examples:
 
-- The UI includes a "Run Unit Tests" button which triggers `tests.RunTests()` (if present).
-- You can also invoke test functions programmatically via the Lua console if required.
+- Toggle DB usage:
+  - `/mqoverseer useDatabase false`
+- Toggle adding quests to DB (debug):
+  - `/mqoverseer addToDatabase true`
+- Toggle validation mode:
+  - `/mqoverseer validateQuestRewardData true`
+- Run a full automated cycle:
+  - `/mqoverseer runFullCycle`
+- Output current quest details:
+  - `/mqoverseer outputQuestDetails`
+- Add/remove specific quests:
+  - `/mqoverseer addSpecificQuest "Quest Name"`
+  - `/mqoverseer removeSpecificQuest "Quest Name"`
 
-## Development notes / Known considerations
+See `overseer_settings_commands.lua` for the full command list.
 
-- io_utils uses LuaJIT FFI to call `CreateDirectoryA` (Kernel32). The declared prototype in the code may not match the system/WinAPI signature exactly; lfs.mkdir is also used in places. Consider standardizing on `lfs.mkdir` for portability and simplicity, or ensure the ffi prototype matches the WinAPI signature exactly to avoid undefined behavior.
-- Path normalization: the code normalizes backslashes to forward slashes and lowercases paths in a few helpers. On case-sensitive hosts this could be surprising; this behavior is intended for MQ on Windows but document or adapt when running elsewhere.
-- Sorting: some ordering logic uses a simple O(n^2) algorithm. For larger lists consider using `table.sort()` with a comparator for performance.
-- Third-party libraries included:
-  - rxi-json (MIT) — included in `utils/json.lua` (license header included)
-  - argparse (MIT) — included in `utils/argparse.lua`
-  - LIP (INI parser) — included in `lib/LIP.lua` (license header present)
-- README/Docs: The repository's top-level readme is minimal. Expanding documentation (usage examples, screenshots, config reference) is recommended.
+---
 
-## Contributing
+## Important settings (what they do)
 
-- Bug reports, feature requests, and pull requests are welcome.
-- When submitting PRs, include test coverage for behavioral changes where applicable.
-- Respect third-party licenses and keep attributions intact for included libraries.
+- Settings.General.useQuestDatabase
+  - true: load quest details from local DB (fast)
+  - false: parse the in-game Overseer UI for current quest data (fresh but slower)
+  - When toggled the UI logs an informative warning/info message.
 
-## Troubleshooting
+- Settings.Debug.processFullQuestRewardData (Add Quests to Database)
+  - When enabled, Overseer will insert new quests discovered during parsing into the DB. Intended for controlled ingestion. Default: false.
 
-- If Overseer fails to start due to missing Lua modules, check MQ logs — PackageMan may attempt an automatic install. You can manually install `luafilesystem` and `lsqlite3` for your MQ Lua runtime if needed.
-- If database operations fail, confirm `lsqlite3` is present and that the MQ process has write permissions to the data directory `<mq.luaDir>/overseer/data`.
-- If you encounter crashes related to FFI calls (CreateDirectoryA), consider switching to `lfs.mkdir` as a safer alternative.
+- Settings.Debug.validateQuestRewardData (Validate Quest Reward Data)
+  - When enabled, Overseer compares the DB value vs currently displayed reward XP and logs discrepancies. Default: false.
+
+- Settings.Debug.updateQuestDatabaseOnValidate
+  - When true and validation finds a mismatch, Overseer will update the DB entry. Default: false.
+
+- Settings.General.rewards.claimRewards
+  - Controls whether rewards are automatically claimed via MQ2Rewards. Use with care.
+
+Notes
+- Many debug flags are intentionally non-persistent by default to avoid accidental writes. See "Database behavior & safety" below.
+
+---
+
+## Database behavior & safety (READ THIS CAREFULLY)
+
+Overseer supports an optional local quest DB. Because DB writes can be destructive or misleading, follow these rules:
+
+- Default policy: DB writes are opt-in and guarded.
+  - New-quest ingestion requires `Add Quests to Database`.
+  - Updates on validation require `Update DB on validate`.
+- Recommended workflow:
+  1. Enable `Validate Quest Reward Data` (dry-run) to log differences.
+  2. Inspect the log output for unexpected values (zeros, huge numbers).
+  3. If results look correct, either enable `Add Quests to Database` for ingestion or `Update DB on validate` to apply changes.
+- Batch & preview:
+  - Prefer buffering changes during a run and applying them as a batch at the cycle end. (The codebase can be extended to support a preview/confirm flow if desired.)
+- Persistence of debug flags:
+  - Legacy initializer may reset some debug flags on startup to avoid accidental persistence. If you want a debug flag to persist, change the initializer deliberately and understand the risk.
+- XP variance across characters:
+  - Quest reward XP often varies by character level or level cap. Avoid blind overwrites of a single numeric XP field. Consider switching to per-level or per-cap storage (JSON field or separate table) before enabling large-scale ingestion across characters.
+- Backups:
+  - Before performing any bulk DB writes/migrations, make a DB backup.
+
+---
+
+## Logging & troubleshooting
+
+- Use Settings -> General -> Log Level to increase verbosity. `Trace` provides very detailed diagnostics.
+- Typical log messages:
+  - Info when switching DB usage.
+  - "EXP VIOLATION" when stored DB value and current UI value differ.
+  - Warnings when UI elements are not ready and actions are skipped.
+- Troubleshooting tips:
+  - If tabs appear in unexpected order, ImGui remembers reordering—drag them back or remove/recreate ImGui settings (`imgui.ini`) to reset.
+  - If the UI fails to render or errors on load, check MQ logs for Lua syntax or module require failures.
+  - If DB writes occur unexpectedly, verify that `processFullQuestRewardData` or `updateQuestDatabaseOnValidate` are false and that Test Mode isn't re-enabling them.
+
+---
+
+## Development & contributing
+
+- Code layout (high level):
+  - `overseer.lua` — core automation and parsing logic
+  - `overseerui.lua` — ImGui UI
+  - `overseer_settings.lua` / `overseer_settings_legacy.lua` — settings load/save and legacy migration
+  - `overseer_settings_commands.lua` — CLI command handlers
+  - `database.lua` or equivalent DB module — DB access
+  - `overseer.utils.logger` — logging helper
+- Testing:
+  - Add unit tests for parsing and string utilities; run tests via UI Actions -> Run Unit Tests (if present).
+- DB schema changes:
+  - When adding per-level XP or changing schema, include:
+    - Migration code that safely upgrades existing DBs
+    - Automated DB backup before first write after upgrade
+    - Tests or a preview/confirm UI to inspect proposed changes
+- PR checklist:
+  - Describe functional changes, DB migrations, and backup steps
+  - Keep debug-write flags transient unless explicitly required to be persistent
+  - Update README and any in-UI help text for new behavior
+
+---
+
+## Examples
+
+- Set log level to Trace via Lua console:
+```lua
+Settings.General.logLevel = 6 -- Trace
+settings.SetLogLevel(6)
+settings.SaveSettings()
+```
+
+- Disable DB usage and run a full cycle:
+```
+/mqoverseer useDatabase false
+/mqoverseer runFullCycle
+```
+
+---
 
 ## License
 
-The project includes code under permissive licenses (see headers in `utils/json.lua`, `utils/argparse.lua`, etc.). The rest of the project is distributed under the MIT License (if that is your intended license). Please add a top-level `LICENSE` file to the repository if you want to make the license explicit.
+Add your preferred license here (e.g., MIT, Apache-2.0). Please include a LICENSE file in the repo.
 
-## Contact / Author
+---
 
-Cannonballdex — repository: `cannonballdex/Overseer`
+## Help & contact
+
+Open an issue on the project repo for bugs and feature requests. For implementation help or to propose changes, submit a PR with clear migration steps if DB changes are included.
+
+---
+
+If you'd like, I can:
+- Open a PR that replaces the current README.md with this version,
+- Produce a shorter QuickStart-only README,
+- Or tweak this draft to match the exact tone/content of your previous README—tell me what you want copied back and I'll integrate it.
