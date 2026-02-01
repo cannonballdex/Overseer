@@ -163,6 +163,11 @@ do
 
   print(msg)
 end
+-- Informative startup log if user opted to parse UI instead of using DB
+if Settings and Settings.General and Settings.General.useQuestDatabase == false then
+    logger.info('\ayDatabase is disabled. \atOverseer will parse quests from the in-game UI. (slower and UI-dependent)')
+    logger.info('\atYou can \agEnable Database \atGeneral/Settings/Use Quest Database')
+end
 
 ui.InitializeUi(Settings.General and Settings.General.showUi)
 overseer.Main()
