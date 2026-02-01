@@ -209,11 +209,12 @@ function EnsureIniDefaults_VersionUpdates()
 
 	EnsureExists('General', 'campAfterFullCycle', false)
 	EnsureExists('General', 'campAfterFullCycleFastCamp', false)
-	if (Settings.General.useQuestDatabase ~= true) then Settings.General.useQuestDatabase = true end
+	
 
-	-- These shouldn't be persisted, and shouldn't be used by "normies"
-	Settings.Debug.processFullQuestRewardData = false
-	Settings.Debug.validateQuestRewardData = false
+	-- These shouldn't be persisted, and shouldn't be used by "normies" But were not normies.
+	--Settings.Debug.processFullQuestRewardData = false
+	--Settings.Debug.validateQuestRewardData = false
+	--if (Settings.General.useQuestDatabase ~= true) then Settings.General.useQuestDatabase = true end
 
 	if (Settings.General.version == nil or Settings.General.version >= actions.SettingsVersion) then
 		return
