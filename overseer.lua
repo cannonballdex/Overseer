@@ -445,34 +445,70 @@ local ClaimReward_Error = -1
 ---@param rewardName string Defines name of reward to look up
 ---@param wait_for_reward_delay_ms number? If defined, wait this long for reward to appear in the window
 ---@return integer 1 if able to complete reward, 0 if not one for us to complete, -1 if error attempting to complete
+-- Finds reward with specified name and collects, if configurations facilitate.
+-- Returns integer: 1 if completed, 0 skipped, -1 error attempting to complete
+-- Finds reward with specified name and collects, if configurations facilitate.
+-- Returns integer: 1 if completed, 0 if skipped, -1 if error attempting to complete
 local function collect_specific_reward(rewardName, wait_for_reward_delay_ms)
-	if (Settings.General.rewards.claimRewards == false) then
-		return ClaimReward_Skipped
-	end
+    if (Settings.General.rewards.claimRewards == false) then
+        return ClaimReward_Skipped
+    end
 
-	load_mq2rewards()
-	if (mq.TLO.Plugin("MQ2Rewards").IsLoaded() == false) then
-		logger.warning('Not claiming rewards. MQ2Rewards unable to be loaded.')
-		return ClaimReward_Skipped
-	end
+    ::try_again::
+    -- Try to find the reward in the MQ Rewards list (may not be present immediately)
+    local rewardItem, rewardIndex = find_specific_reward_by_name(rewardName)
+    if (rewardItem == nil or rewardIndex == nil) then
+        if (wait_for_reward_delay_ms == nil or wait_for_reward_delay_ms <= 0) then
+            logger.error('\at REWARD NOT FOUND: %s', rewardName)
+            return ClaimReward_Skipped
+        end
 
-	::try_again::
-	local rewardItem, rewardIndex = find_specific_reward_by_name(rewardName)
-	if (rewardItem == nil or rewardIndex == nil) then
-		if (wait_for_reward_delay_ms == nil or wait_for_reward_delay_ms <= 0) then
-			logger.error('\at REWARD NOT FOUND: %s', rewardName)
-			-- os.exit()
-			return ClaimReward_Skipped
-		end
+        -- Wait up to wait_for_reward_delay_ms for reward to appear, then retry once
+        mq.delay(wait_for_reward_delay_ms, function() return mq.TLO.Rewards.Reward(rewardName).Text() ~= nil end)
 
-		mq.delay(wait_for_reward_delay_ms, function() return mq.TLO.Rewards.Reward(rewardName).Text() ~= nil end)
+        wait_for_reward_delay_ms = nil
+        goto try_again
+    end
 
-		wait_for_reward_delay_ms = nil
-		goto try_again
-	end
+    -- If the in-game Reward Selection window isn't open or has no children, skip claiming.
+    local reward_window_open = mq.TLO.Window('RewardSelectionWnd').Open()
+    local reward_window_children = mq.TLO.Window('RewardSelectionWnd').Children()
+    if (not reward_window_open or reward_window_children == false) then
+        logger.info('RewardSelectionWnd not open or has no children; skipping MQ2Rewards claim for %s', tostring(rewardName))
+        return ClaimReward_Skipped
+    end
 
-	-- TODO: Handle Gather EXP Details for this mechanism
-	return CollectSpecificReward(rewardItem, rewardIndex, false, nil)
+    -- Try to detect if this reward has claim options (some Reward TLOs expose an Option/OptionCount property)
+    local has_options = false
+    local ok, optcount = pcall(function() return rewardItem.OptionCount end)
+    if ok and type(optcount) == 'number' and optcount > 0 then
+        has_options = true
+    else
+        -- If no OptionCount property, fall back to checking the global Rewards list count
+        local reward_count = mq.TLO.Rewards.Count()
+        if reward_count and reward_count > 0 then
+            -- additional heuristic: ensure the reward we found has at least some descriptive text
+            local rtxt = rewardItem.Text()
+            if rtxt and rtxt ~= '' then
+                has_options = true
+            end
+        end
+    end
+
+    if not has_options then
+        logger.info('No claim options/buttons detected for reward "%s" — skipping MQ2Rewards claim', tostring(rewardName))
+        return ClaimReward_Skipped
+    end
+
+    -- At this point the reward is present, the reward window is open, and options look present:
+    load_mq2rewards()
+    if (mq.TLO.Plugin("MQ2Rewards").IsLoaded() == false) then
+        logger.warning('Not claiming rewards. MQ2Rewards unable to be loaded.')
+        return ClaimReward_Skipped
+    end
+
+    -- Delegate to the existing claim implementation that accepts a RewardItem TLO and index
+    return CollectSpecificReward(rewardItem, rewardIndex, false, nil)
 end
 
 local function claim_missions_and_rewards()
@@ -751,6 +787,7 @@ local function process_active_quest(NODE)
 		logger.info('\ay%s\ao has succeeded.  Claiming.', questName)
 		wait_for_loading()
 		mqutils.leftmouseup('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton')
+		CursorCheck()
 	elseif (mq.TLO.Window('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CompleteQuestButton').Enabled()) then
 		logger.info('\ay%s\ao has failed.  Completing.', questName)
 		wait_for_loading()
@@ -850,8 +887,26 @@ function SkipRewardOption(rewardOptionName)
 	if (rewardOptionName ~= "Character Experience") then return false end
 
 	local maxLevel = Settings.General.maxLevelForClaimingExpReward
-	if (Settings.General.maxLevelUseCurrentCap) then
-		maxLevel = mq.TLO.Me.MaxLevel()
+	-- Sync stored max level cap to current character cap when "Use Current Character Level Cap" is enabled.
+	-- Safe to paste in any file (UI render or periodic loop).
+	local ok, currentCap = pcall(function() return mq.TLO.Me.MaxLevel() end)
+	currentCap = ok and currentCap or nil
+
+	if currentCap ~= nil and Settings and Settings.General and Settings.General.maxLevelUseCurrentCap then
+		if Settings.General.maxLevelForClaimingExpReward ~= currentCap then
+			Settings.General.maxLevelForClaimingExpReward = currentCap
+
+			-- Try to get the settings module (use loaded copy if present to avoid re-require)
+			local settings_mod = package.loaded['overseer.overseer_settings'] or require('overseer.overseer_settings')
+
+			if settings_mod and settings_mod.SaveSettings then
+				settings_mod.SaveSettings()
+			end
+
+			if logger and logger.info then
+				logger.info("Synced maxLevelForClaimingExpReward to current cap: %s", tostring(currentCap))
+			end
+		end
 	end
 	local maxPct = Settings.General.maxLevelPctForClaimingExpReward
 	if (maxLevel == nil) then return false end
@@ -994,19 +1049,26 @@ end
 ---Walks all outstanding rewards, collecting any our current configuration requests
 ---@param gather_exp_list_only boolean If true, does not claim rewards, but builds list of exp rewards
 ---@return boolean, table? If true, reward selection conmpleted successfully; else if false - claiming failed for error reasons.
+-- instrumentation: log rewards and caller when collecting pending rewards
 function CollectAllRewards_Internal(gather_exp_list_only)
-	if (Settings.General.rewards.claimRewards == false) then
-		logger.info('Nothing to claim.')
-		logger.warning('Not claiming rewards per configuration')
-		return true
-	end
+    -- existing early guards...
+    if (Settings.General.rewards.claimRewards == false) then
+        logger.info('Nothing to claim.')
+        logger.warning('Not claiming rewards per configuration')
+        return true
+    end
 
-	-- if (Settings.General.rewards.maximizeStoredExpRewards == true) then
-	-- 	logger.info('Not claiming rewards per configuration (maximize exp)')
-	-- 	return
-	-- end
+    -- Diagnostic: list reward items reported by MQ2Rewards before attempting any claims
+    local rewardCount = mq.TLO.Rewards.Count()
+    logger.trace('[REWARD DEBUG] CollectAllRewards_Internal called; MQ2Rewards.Count = %s', tostring(rewardCount))
+    for i = rewardCount, 1, -1 do
+        local r = mq.TLO.Rewards.Reward(i)
+        logger.trace('[REWARD DEBUG] reward[%d] = "%s"', i, tostring(r.Text()))
+    end
+    logger.trace('[REWARD DEBUG] Stack: %s', debug.traceback())
 
-	local weLoadedMq2Rewards = load_mq2rewards()
+    -- existing logic continues...
+    local weLoadedMq2Rewards = load_mq2rewards()
 	if (mq.TLO.Plugin("MQ2Rewards").IsLoaded() == false) then
 		logger.warning('Not claiming rewards. MQ2Rewards unable to be loaded.')
 		return true
@@ -1991,11 +2053,13 @@ function ClaimFastQuest()
 	end
 
 	logger.info('\ay%s\ao has succeeded.  Claiming.', quest_name)
+
 	mqutils.leftmouseup('OverseerWnd/OW_OverseerActiveQuestsPage/OW_ALL_CollectRewardButton')
 
 	-- Wait until the quest has been removed from Active Quests tab, which can take a moment, else it's not back in Quests window
 	mq.doevents()
 	mq.delay(1000)  -- TODO: Add a "While Title ~= quest_name" kind of delay condition
+	CursorCheck()
 end
 
 function SelectActiveQuest(name)
@@ -2406,7 +2470,7 @@ function ClaimAdditionalItems(itemName)
 			logger.error('\arItemDisplayWindow\ao was closed.  Stopping claiming of \ay%s\ao for this run.', itemName)
 			return false
 		end
-		
+
 		mqutils.leftmouseup('ItemDisplayWindow/IDW_RewardButton')
 		mqutils.autoinventory(true)
 
