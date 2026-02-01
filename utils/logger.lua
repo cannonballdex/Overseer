@@ -24,7 +24,6 @@ function actions.error(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ar %s', logLeader, output)
 end
 
@@ -33,7 +32,6 @@ function actions.warning(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \aw %s', logLeader, output)
 end
 
@@ -42,7 +40,6 @@ function actions.info(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ao %s', logLeader, output)
 end
 
@@ -51,7 +48,6 @@ function actions.debug(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.cmd(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ag %s', logLeader, output)
 end
 
@@ -60,7 +56,6 @@ function actions.trace(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.cmd(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ay %s', logLeader, output)
 end
 
