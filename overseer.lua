@@ -1411,16 +1411,69 @@ function LoadAvailableQuests(loadExtraData)
 
 	-- if DB has an entry and values differ:
 	-- Updated validation/update handling:
-if (Settings.Debug.validateQuestRewardData and database_exp_amount ~= nil and database_exp_amount ~= current_quest.experience) then
-    logger.error('\ar EXP VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
-    if Settings.Debug.updateQuestDatabaseOnValidate then
-        logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
-        db.UpdateQuestDetails(questName, current_quest)
-    else
-        logger.error('    \at Not updating database at all for this quest.')
+-- if DB has an entry and values differ:
+-- Updated validation/update handling (expand to include successRate)
+do
+    -- Helper: normalize a UI/DB success string to a numeric-string (no '%') or nil
+    local function normalize_success_raw(raw)
+        if raw == nil then return nil end
+        local s = tostring(raw):gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:gsub("%%$", "") -- remove trailing percent sign if present
+        if s == '' then return nil end
+        local n = tonumber(s)
+        if n then
+            -- store as simple numeric string (e.g. "75")
+            return tostring(n)
+        end
+        -- fallback: return trimmed string if not numeric
+        return s
     end
-elseif (database_exp_amount == nil and Settings.Debug.processFullQuestRewardData == true) then
-    db.UpdateQuestDetails(questName, current_quest)
+
+    local db_exp_present = (database_exp_amount ~= nil)
+    local exp_mismatch = (Settings.Debug.validateQuestRewardData and db_exp_present and database_exp_amount ~= current_quest.experience)
+
+    -- read UI success text (try same widget path used elsewhere)
+    local ui_success_text = nil
+    local ok_s, val_s = pcall(function() return mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text() end)
+    if ok_s and val_s and tostring(val_s) ~= 'NULL' then
+        ui_success_text = val_s
+    end
+
+    local db_success_norm = normalize_success_raw(current_quest.successRate)
+    local ui_success_norm = normalize_success_raw(ui_success_text)
+
+    local success_mismatch = (Settings.Debug.validateQuestRewardData and db_success_norm ~= nil and db_success_norm ~= ui_success_norm)
+
+    -- If either experience or success mismatches, log and optionally update DB (single update)
+    if exp_mismatch or success_mismatch then
+        if exp_mismatch then
+            logger.error('\ar EXP (experience) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
+        end
+        if success_mismatch then
+            logger.error('\ar SUCCESS (successRate) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_success_norm), tostring(ui_success_norm))
+        end
+
+        if Settings.Debug.updateQuestDatabaseOnValidate then
+            logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
+            -- ensure we write the normalized UI successRate into the model
+            if ui_success_norm ~= nil then
+                current_quest.successRate = ui_success_norm
+            else
+                current_quest.successRate = '' -- keep same DB semantics as sql_escape(nil) -> ''
+            end
+            -- current_quest.experience already contains the current UI value
+            db.UpdateQuestDetails(questName, current_quest)
+        else
+            logger.error('    \at Not updating database at all for this quest.')
+        end
+
+    elseif (not db_exp_present and db_success_norm == nil and Settings.Debug.processFullQuestRewardData == true) then
+        -- If DB has no record for experience AND no stored successRate, and ingestion is enabled, add the quest
+        if ui_success_norm ~= nil then
+            current_quest.successRate = ui_success_norm
+        end
+        db.UpdateQuestDetails(questName, current_quest)
+    end
 end
 
 	::doneWithThisNode::
