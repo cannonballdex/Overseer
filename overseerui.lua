@@ -10,8 +10,11 @@ local tests = require('overseer.tests.string_utils_tests')
 local string_utils = require('overseer/utils/string_utils')
 local icons = require('mq.Icons')
 
+-- Add near other locals at top of file
+local auto_fit_window = true
+local auto_fit_edge_threshold = 8 -- pixels from edge to consider a resize drag
+
 -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
-local claims_section_open = true
 local pending_window_size = nil
 
 -- Track collapse/expand state of agent sections (initialized true to match previous behavior)
@@ -23,6 +26,23 @@ local agent_section_open = {
 }
 
 local actions = {}
+
+-- Sync UI runtime flags when settings are saved
+if settings.RegisterSettingsChangeCallback then
+    settings.RegisterSettingsChangeCallback(function()
+        -- Sync the runtime flag used by the UI for test-mode tab visibility
+        if Settings and Settings.Debug then
+            settings.InTestMode = Settings.Debug.allowTestMode or false
+        else
+            settings.InTestMode = false
+        end
+
+        -- Optionally log
+        if logger and logger.info then
+            logger.info("Settings changed on disk — synced UI runtime flags (InTestMode=%s)", tostring(settings.InTestMode))
+        end
+    end)
+end
 
 --- @type boolean
 Open, ShowUI = true, true
@@ -125,8 +145,68 @@ function DrawMainWindow()
     end
 
     local changed
-    MyShowUi, ShowUI = ImGui.Begin('Overseer', Open)
+
+    -- Detect if persisted setting differs from current runtime auto_fit_window.
+    -- Do NOT capture window size here (Begin hasn't been called yet).
+    local pending_auto_fit_change = nil
+    if Settings and Settings.General and type(Settings.General.autoFitWindow) == 'boolean' then
+        local stored = Settings.General.autoFitWindow
+        if stored ~= auto_fit_window then
+            -- remember the desired target so we can apply it after Begin (where GetWindowSize is valid)
+            pending_auto_fit_change = stored
+            -- don't modify auto_fit_window yet; keep current behavior for this frame
+        end
+    end
+
+    -- Decide window flags based on auto-fit state (current runtime value)
+    local windowFlags = 0
+    if auto_fit_window then
+        windowFlags = bit32.bor(windowFlags, ImGuiWindowFlags.AlwaysAutoResize)
+    end
+
+    MyShowUi, ShowUI = ImGui.Begin('Overseer', Open, windowFlags)
     if ShowUI then
+        -- If there was a change from the persisted setting, apply it now while window exists
+        if pending_auto_fit_change ~= nil then
+            if pending_auto_fit_change == false and auto_fit_window == true then
+                -- User turned AUTO-FIT OFF in the Settings tab: capture current window size and set it immediately
+                local ww, wh = ImGui.GetWindowSize()
+                -- Apply size immediately so the window keeps the same dimensions this frame and becomes resizable
+                ImGui.SetWindowSize(ww or 400, wh or 300)
+                auto_fit_window = false
+            elseif pending_auto_fit_change == true and auto_fit_window == false then
+                -- User turned AUTO-FIT ON in Settings tab: enable auto-fit and clear any pending manual size
+                auto_fit_window = true
+                pending_window_size = nil
+            end
+            pending_auto_fit_change = nil
+        end
+
+        -- If auto-fit is enabled, auto-disable it when the user begins dragging a window edge (so they can resize manually).
+        -- Apply the size immediately (SetWindowSize) and persist the change so the window is resizable right away.
+        if auto_fit_window and ImGui.IsWindowHovered() and ImGui.IsMouseDragging(0) then
+            local mx, my = ImGui.GetMousePos()
+            local wx, wy = ImGui.GetWindowPos()
+            local ww, wh = ImGui.GetWindowSize()
+            local right = wx + (ww or 0)
+            local bottom = wy + (wh or 0)
+
+            local near_right = mx >= (right - auto_fit_edge_threshold) and mx <= right
+            local near_bottom = my >= (bottom - auto_fit_edge_threshold) and my <= bottom
+
+            if near_right or near_bottom then
+                -- user is dragging near an edge → assume they want manual resize, disable auto-fit
+                auto_fit_window = false
+                -- Set window size immediately so the UI reflects the user's intention this frame
+                ImGui.SetWindowSize(ww or 400, wh or 300)
+
+                -- persist change so the preference survives reloads
+                Settings.General = Settings.General or {}
+                Settings.General.autoFitWindow = false
+                settings.SaveSettings()
+            end
+        end
+
         if (overseer.HasAutoFillButton() == false) then
             uiutils.text_colored(TextStyle.Error, "Cannot Run Quests. Current UI Skin Has No [Auto Fill] Button.")
             uiutils.add_tooltip("Load the default skin or add the button to current one.")
@@ -172,8 +252,10 @@ function RenderTabBar()
     RenderSettingsTab()
     RenderActionsTab()
     RenderStatsTab()
-    if (settings.InTestMode == true) then
+    local in_test = (settings.InTestMode == true) or (Settings.Debug and Settings.Debug.allowTestMode == true)
+    if in_test then
         RenderTestTab()
+        -- Remote is now a sub-tab of Test; do not call RenderRemoteTab() here.
     end
 
     ImGui.EndTabBar()
@@ -225,7 +307,24 @@ function RenderGeneralTab()
                 uiutils.text_colored(TextStyle.ItemValue, NextRotationTimeStampText)
             end
         end
-
+        -- Small control to let users toggle auto-fit at runtime
+        Settings.General.autoFitWindow, changed = uiutils.add_setting_checkbox("Auto Fit Window",
+            Settings.General.autoFitWindow,
+            'Automatically Resize Window to Fit Content\n\nCommand: autoFitWindow')
+        if (changed) then settings.SaveSettings() end
+        -- Load known quests from database (moved to General Settings)
+        Settings.General.useQuestDatabase, changed = uiutils.add_setting_checkbox('Use Quest Database',
+            Settings.General.useQuestDatabase,
+            'If selected, quests will be loaded from database rather than parsing from the overseer UI.\n\nCommand: useDatabase')
+        if (changed) then
+            settings.SaveSettings()
+            if Settings.General.useQuestDatabase == false then
+                logger.info('\ayDatabase is disabled. \atOverseer will parse quests from the in-game UI. (slower and UI-dependent)')
+                logger.info('\atYou canEnable Database \atGeneral/Settings/Use Quest Database')
+            else
+                logger.info('\agDatabase is enabled. \atOverseer will load quests from the local database for faster operation.')
+            end
+        end
         if (overseer.TutorialIsRequired == true) then
             ImGui.Text("")
             uiutils.text_colored(TextStyle.ImportantLabel, "Tutorial Not Completed")
@@ -283,20 +382,9 @@ function RenderGeneralTab()
 
         ImGui.Separator()
         -- Track collapse/expand of the Claims (Inventory) section and adjust the entire window size.
-        local was_claims_open = claims_section_open
+        ImGui.Separator()
+        -- Track collapse/expand of the Claims (Inventory) section.
         local is_claims_open = ImGui.CollapsingHeader('Overseer Claims (Inventory)')
-        claims_section_open = is_claims_open or false
-
-        -- If the user just collapsed the section, shrink the whole window.
-        -- If they just expanded it, restore a larger window.
-        if (not is_claims_open and was_claims_open) then
-            -- user collapsed → minimize window. Adjust numbers to taste:
-            pending_window_size = { width = 300, height = 225 }
-        elseif (is_claims_open and not was_claims_open) then
-            -- user expanded → restore to a larger size. Adjust to your preferred default:
-            pending_window_size = { width = 300, height = 375 }
-        end
-
         if is_claims_open then
             local flags = bit32.bor(ImGuiTableFlags.Resizable, ImGuiTableFlags.RowBg, ImGuiTableFlags.BordersOuter)
             if ImGui.BeginTable('##tableClaims', 2, flags, 0, TEXT_BASE_HEIGHT, 0.0) then
@@ -344,276 +432,251 @@ local log_levels = { "Off", "Error", "Warning", "Normal", "Debug", "Trace" }
 function RenderSettingsGeneralTab()
     if ImGui.BeginTabItem("General") then
         local changed
-        -- local useCharacterConfigurations
-        -- useCharacterConfigurations, changed = ImGui.Checkbox('Use Character Configurations', overseer.UsingCharacterConfiguration)
-        -- if (changed) then
-        --     UpdateGlobalCharConfigurationSetting(useCharacterConfigurations)
-        -- end
 
         ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, 'General Settings')
-        ImGui.Separator()
-
-        Settings.General.runFullCycleOnStartup, changed = uiutils.add_setting_checkbox("Run Full Cycle on Startup",
-            Settings.General.runFullCycleOnStartup,
-            'Runs the full Overseer cycle when script begins\n\nCommand: runOnStartup')
-        if (changed) then settings.SaveSettings() end
-
-        Settings.General.autoRestartEachCycle, changed = uiutils.add_setting_checkbox("Automatically Restart",
-            Settings.General.autoRestartEachCycle,
-            'Automatically run full cycle when next quest has completed or on quest rotation\n\nCommand: autoRestart')
-        if (changed) then settings.SaveSettings() end
-
-        Settings.General.pauseOnCharacterChange, changed = uiutils.add_setting_checkbox("Pause On Char Change",
-            Settings.General.pauseOnCharacterChange, 'Pauses cycles until character that started the script logs in')
-        if (changed) then settings.SaveSettings() end
-
-        -- Load known quests from database (moved to General Settings)
-        Settings.General.useQuestDatabase, changed = uiutils.add_setting_checkbox('Use Quest Database',
-            Settings.General.useQuestDatabase,
-            'If selected, quests will be loaded from database rather than parsing from the overseer UI.\n\nCommand: useDatabase')
-        if (changed) then
-            settings.SaveSettings()
-            if Settings.General.useQuestDatabase == false then
-                logger.info('\ayDatabase is disabled. \atOverseer will parse quests from the in-game UI. (slower and UI-dependent)')
-                logger.info('\atYou canEnable Database \atGeneral/Settings/Use Quest Database')
-            else
-                logger.info('\agDatabase is enabled. \atOverseer will load quests from the local database for faster operation.')
-            end
-        end
-
-        Settings.General.campAfterFullCycle, changed = uiutils.add_setting_checkbox("Camp Character After Full Run",
-            Settings.General.campAfterFullCycle, 'Camps character to desktop after full run.\n\nCommand: campAfterFullCycle')
-        if (changed) then settings.SaveSettings() end
-        if (Settings.General.campAfterFullCycle) then
-            ImGui.Indent(20)
-            Settings.General.campAfterFullCycleFastCamp, changed = uiutils.add_setting_checkbox("Fast Camp",
-                Settings.General.campAfterFullCycleFastCamp, 'Fast Camps to desktop ("/yes") when in a fast camp zone.\n\nCommand: campAfterFullCycleFastCamp')
-            ImGui.Unindent(20)
+        -- General Settings section as collapsible header
+        if ImGui.CollapsingHeader("General Settings") then
+            Settings.General.runFullCycleOnStartup, changed = uiutils.add_setting_checkbox("Run Full Cycle on Startup",
+                Settings.General.runFullCycleOnStartup,
+                'Runs the full Overseer cycle when script begins\n\nCommand: runOnStartup')
             if (changed) then settings.SaveSettings() end
-        end
 
-        ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, "Claim Settings")
-        ImGui.Separator()
-        RenderSettingsRewardsGeneralSection()
-
-        ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, "Ignore Specific Quests")
-        ImGui.Separator()
-
-        Settings.General.ignoreRecruitmentQuests, changed = uiutils.add_setting_checkbox('Ignore Recruitment Quests',
-            Settings.General.ignoreRecruitmentQuests,
-            'If selected, will not run Recruitment quests\n\nCommand: ignoreRecruit')
-        if (changed) then settings.SaveSettings() end
-
-        Settings.General.ignoreConversionQuests, changed = uiutils.add_setting_checkbox('Ignore Conversion Quests',
-            Settings.General.ignoreConversionQuests,
-            'If selected, will not run Conversion quests\n\nCommand: ignoreConversion')
-        if (changed) then settings.SaveSettings() end
-
-        Settings.General.ignoreRecoveryQuests, changed = uiutils.add_setting_checkbox('Ignore Recovery Quests',
-            Settings.General.ignoreRecoveryQuests,
-            'If selected, will not run Recovery quests\n\nCommand: ignoreRecovery')
-        if (changed) then settings.SaveSettings() end
-
-        ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, "Agents Required Before Conversion")
-        ImGui.Separator()
-
-        -- TODO: Elite Retire
-        Settings.General.convertEliteAgents, changed = uiutils.add_setting_checkbox('Convert Elite Agents',
-            Settings.General.convertEliteAgents,
-            'Specifies number of elite agents to maintain\n\nCommand: convertEliteAgents')
-        if (changed) then settings.SaveSettings() end
-        if (Settings.General.convertEliteAgents) then
-            ImGui.Indent(20)
-        end
-
-        if Settings.General.agentCountForConversionCommon ~= nil then
-            ImGui.PushItemWidth(100)
-            Settings.General.agentCountForConversionCommon, changed = ImGui.InputInt("Common",
-                Settings.General.agentCountForConversionCommon, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-            uiutils.add_tooltip('Specifies number of common agents to maintain\n\nCommand: conversionCountCommon #')
-
-            if Settings.General.agentCountForConversionCommon < 2 then Settings.General.agentCountForConversionCommon = 1 end
+            Settings.General.autoRestartEachCycle, changed = uiutils.add_setting_checkbox("Automatically Restart",
+                Settings.General.autoRestartEachCycle,
+                'Automatically run full cycle when next quest has completed or on quest rotation\n\nCommand: autoRestart')
             if (changed) then settings.SaveSettings() end
-                        ImGui.SameLine()
-            if ImGui.Button'Mass Convert Common' then
-                mq.cmdf('/overseermassconvert common %s', Settings.General.agentCountForConversionCommon)
-            end
 
-            ImGui.PushItemWidth(100)
-            Settings.General.agentCountForConversionUncommon, changed = ImGui.InputInt("Uncommon",
-                Settings.General.agentCountForConversionUncommon, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-            uiutils.add_tooltip('Specifies number of uncommon agents to maintain\n\nCommand: conversionCountUncommon #')
-            if Settings.General.agentCountForConversionUncommon < 2 then Settings.General.agentCountForConversionUncommon = 1 end
+            Settings.General.pauseOnCharacterChange, changed = uiutils.add_setting_checkbox("Pause On Char Change",
+                Settings.General.pauseOnCharacterChange, 'Pauses cycles until character that started the script logs in')
             if (changed) then settings.SaveSettings() end
-                        ImGui.SameLine()
-            local uncommon = Settings.General.agentCountForConversionUncommon
-            if ImGui.Button'Mass Convert Uncommon' then
-                mq.cmdf('/overseermassconvert uncommon %s', uncommon)
-            end
 
-            ImGui.PushItemWidth(100)
-            Settings.General.agentCountForConversionRare, changed = ImGui.InputInt("Rare",
-                Settings.General.agentCountForConversionRare, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-            uiutils.add_tooltip('Specifies number of rare agents to maintain\n\nCommand: conversionCountRare #')
-            if Settings.General.agentCountForConversionRare < 2 then Settings.General.agentCountForConversionRare = 1 end
+            Settings.General.campAfterFullCycle, changed = uiutils.add_setting_checkbox("Camp Character After Full Run",
+                Settings.General.campAfterFullCycle, 'Camps character to desktop after full run.\n\nCommand: campAfterFullCycle')
             if (changed) then settings.SaveSettings() end
-                        ImGui.SameLine()
-            if ImGui.Button'Mass Convert Rare' then
-                mq.cmdf('/overseermassconvert rare %s', Settings.General.agentCountForConversionRare)
-            end
-
-            if (Settings.General.convertEliteAgents) then
-                ImGui.PushItemWidth(100)
-                Settings.General.agentCountForConversionElite, changed = ImGui.InputInt("Elite",
-                    Settings.General.agentCountForConversionElite, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-                uiutils.add_tooltip('Specifies number of elite agents to maintain\n\nCommand: conversionCountElite #')
-                if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
-                if (changed) then settings.SaveSettings() end
-                                ImGui.SameLine()
-                uiutils.add_icon_action_button(icons.MD_TRANSFER_WITHIN_A_STATION, 'Retire Elite Agents##retireElite2', 'RetireEliteAgents','Retire Elite Agents')
+            if (Settings.General.campAfterFullCycle) then
+                ImGui.Indent(20)
+                Settings.General.campAfterFullCycleFastCamp, changed = uiutils.add_setting_checkbox("Fast Camp",
+                    Settings.General.campAfterFullCycleFastCamp, 'Fast Camps to desktop ("/yes") when in a fast camp zone.\n\nCommand: campAfterFullCycleFastCamp')
                 ImGui.Unindent(20)
+                if (changed) then settings.SaveSettings() end
             end
         end
+        ImGui.Separator()
 
+        -- Claim Settings section as collapsible header
+        if ImGui.CollapsingHeader("Claim Settings") then
+            RenderSettingsRewardsGeneralSection()
+        end
+        ImGui.Separator()
+
+        -- Ignore Specific Quests section as collapsible header
+        if ImGui.CollapsingHeader("Ignore Specific Quests") then
+            Settings.General.ignoreRecruitmentQuests, changed = uiutils.add_setting_checkbox('Ignore Recruitment Quests',
+                Settings.General.ignoreRecruitmentQuests,
+                'If selected, will not run Recruitment quests\n\nCommand: ignoreRecruit')
+            if (changed) then settings.SaveSettings() end
+
+            Settings.General.ignoreConversionQuests, changed = uiutils.add_setting_checkbox('Ignore Conversion Quests',
+                Settings.General.ignoreConversionQuests,
+                'If selected, will not run Conversion quests\n\nCommand: ignoreConversion')
+            if (changed) then settings.SaveSettings() end
+
+            Settings.General.ignoreRecoveryQuests, changed = uiutils.add_setting_checkbox('Ignore Recovery Quests',
+                Settings.General.ignoreRecoveryQuests,
+                'If selected, will not run Recovery quests\n\nCommand: ignoreRecovery')
+            if (changed) then settings.SaveSettings() end
+        end
+        ImGui.Separator()
+
+        -- Agents Required Before Conversion section as collapsible header
+        if ImGui.CollapsingHeader("Agents Required Before Conversion") then
+            Settings.General.convertEliteAgents, changed = uiutils.add_setting_checkbox('Convert Elite Agents',
+                Settings.General.convertEliteAgents,
+                'Specifies number of elite agents to maintain\n\nCommand: convertEliteAgents')
+            if (changed) then settings.SaveSettings() end
+            if (Settings.General.convertEliteAgents) then
+                ImGui.Indent(20)
+            end
+
+            if Settings.General.agentCountForConversionCommon ~= nil then
+                ImGui.PushItemWidth(100)
+                Settings.General.agentCountForConversionCommon, changed = ImGui.InputInt("Common",
+                    Settings.General.agentCountForConversionCommon, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                uiutils.add_tooltip('Specifies number of common agents to maintain\n\nCommand: conversionCountCommon #')
+
+                if Settings.General.agentCountForConversionCommon < 2 then Settings.General.agentCountForConversionCommon = 1 end
+                if (changed) then settings.SaveSettings() end
+                ImGui.SameLine()
+                if ImGui.Button'Mass Convert Common' then
+                    mq.cmdf('/overseermassconvert common %s', Settings.General.agentCountForConversionCommon)
+                end
+
+                ImGui.PushItemWidth(100)
+                Settings.General.agentCountForConversionUncommon, changed = ImGui.InputInt("Uncommon",
+                    Settings.General.agentCountForConversionUncommon, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                uiutils.add_tooltip('Specifies number of uncommon agents to maintain\n\nCommand: conversionCountUncommon #')
+                if Settings.General.agentCountForConversionUncommon < 2 then Settings.General.agentCountForConversionUncommon = 1 end
+                if (changed) then settings.SaveSettings() end
+                ImGui.SameLine()
+                local uncommon = Settings.General.agentCountForConversionUncommon
+                if ImGui.Button'Mass Convert Uncommon' then
+                    mq.cmdf('/overseermassconvert uncommon %s', uncommon)
+                end
+
+                ImGui.PushItemWidth(100)
+                Settings.General.agentCountForConversionRare, changed = ImGui.InputInt("Rare",
+                    Settings.General.agentCountForConversionRare, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                uiutils.add_tooltip('Specifies number of rare agents to maintain\n\nCommand: conversionCountRare #')
+                if Settings.General.agentCountForConversionRare < 2 then Settings.General.agentCountForConversionRare = 1 end
+                if (changed) then settings.SaveSettings() end
+                ImGui.SameLine()
+                if ImGui.Button'Mass Convert Rare' then
+                    mq.cmdf('/overseermassconvert rare %s', Settings.General.agentCountForConversionRare)
+                end
+
+                if (Settings.General.convertEliteAgents) then
+                    ImGui.PushItemWidth(100)
+                    Settings.General.agentCountForConversionElite, changed = ImGui.InputInt("Elite",
+                        Settings.General.agentCountForConversionElite, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                    uiutils.add_tooltip('Specifies number of elite agents to maintain\n\nCommand: conversionCountElite #')
+                    if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
+                    if (changed) then settings.SaveSettings() end
+                    ImGui.SameLine()
+                    uiutils.add_icon_action_button(icons.MD_TRANSFER_WITHIN_A_STATION, 'Retire Elite Agents##retireElite2', 'RetireEliteAgents','Retire Elite Agents')
+                    ImGui.Unindent(20)
+                end
+            end
+        end
         ImGui.Separator()
         
-        uiutils.text_colored(TextStyle.ItemValue, "Reward Claim")
-        ImGui.Separator()
+        -- Reward Claim section as collapsible header
+        if ImGui.CollapsingHeader("Reward Claim") then
+            if Settings.General.maxLevelForClaimingExpReward ~= nil then
+                Settings.General.maxLevelUseCurrentCap, changed = uiutils.add_setting_checkbox(
+                'Use Current Character Level Cap: ' .. mq.TLO.Me.MaxLevel(),
+                Settings.General.maxLevelUseCurrentCap,
+                'Always claim exp up to current character level cap.'
+                )
 
-        if Settings.General.maxLevelForClaimingExpReward ~= nil then
-            Settings.General.maxLevelUseCurrentCap, changed = uiutils.add_setting_checkbox(
-            'Use Current Character Level Cap: ' .. mq.TLO.Me.MaxLevel(),
-            Settings.General.maxLevelUseCurrentCap,
-            'Always claim exp up to current character level cap.'
-            )
-
-            if (changed) then
-                -- If user enabled "use current cap", copy the current runtime cap into the stored setting
-                if (Settings.General.maxLevelUseCurrentCap) then
-                    Settings.General.maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel()
+                if (changed) then
+                    -- If user enabled "use current cap", copy the current runtime cap into the stored setting
+                    if (Settings.General.maxLevelUseCurrentCap) then
+                        Settings.General.maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel()
+                    end
+                    settings.SaveSettings()
                 end
-                settings.SaveSettings()
-            end
 
-            if (Settings.General.maxLevelUseCurrentCap) then
-                ImGui.Indent(20)
-                ImGui.Text(" Claiming Exp. ")
-                ImGui.SameLine()
-                uiutils.text_colored(TextStyle.Green, Settings.General.maxLevelPctForClaimingExpReward)
-                ImGui.SameLine()
-                uiutils.text_colored(TextStyle.Green,"%")
-                ImGui.SameLine()
-                ImGui.Text(" into level ")
-                ImGui.SameLine()
-                uiutils.text_colored(TextStyle.Green, Settings.General.maxLevelForClaimingExpReward)
-            end
+                if (Settings.General.maxLevelUseCurrentCap) then
+                    ImGui.Indent(20)
+                    ImGui.Text(" Claiming Exp. ")
+                    ImGui.SameLine()
+                    uiutils.text_colored(TextStyle.Green, Settings.General.maxLevelPctForClaimingExpReward)
+                    ImGui.SameLine()
+                    uiutils.text_colored(TextStyle.Green,"%")
+                    ImGui.SameLine()
+                    ImGui.Text(" into level ")
+                    ImGui.SameLine()
+                    uiutils.text_colored(TextStyle.Green, Settings.General.maxLevelForClaimingExpReward)
+                end
 
-            if (not Settings.General.maxLevelUseCurrentCap) then
+                if (not Settings.General.maxLevelUseCurrentCap) then
+                    ImGui.PushItemWidth(100)
+                    Settings.General.maxLevelForClaimingExpReward, changed = ImGui.InputInt("Custom Max Level Claim Exp.",
+                        Settings.General.maxLevelForClaimingExpReward, 1, mq.TLO.Me.MaxLevel(), ImGuiInputTextFlags.EnterReturnsTrue)
+                    if Settings.General.maxLevelForClaimingExpReward < 1 then Settings.General.maxLevelForClaimingExpReward = 1 end
+                    if Settings.General.maxLevelForClaimingExpReward > mq.TLO.Me.MaxLevel() then Settings.General.maxLevelForClaimingExpReward = 130 end
+                    uiutils.add_tooltip('Max Level To Claim Experience Rewards')
+                    if (changed) then settings.SaveSettings() end
+                end
                 ImGui.PushItemWidth(100)
-                Settings.General.maxLevelForClaimingExpReward, changed = ImGui.InputInt("Custom Max Level Claim Exp.",
-                    Settings.General.maxLevelForClaimingExpReward, 1, mq.TLO.Me.MaxLevel(), ImGuiInputTextFlags.EnterReturnsTrue)
-                if Settings.General.maxLevelForClaimingExpReward < 1 then Settings.General.maxLevelForClaimingExpReward = 1 end
-                if Settings.General.maxLevelForClaimingExpReward > mq.TLO.Me.MaxLevel() then Settings.General.maxLevelForClaimingExpReward = 130 end
-                uiutils.add_tooltip('Max Level To Claim Experience Rewards')
+                Settings.General.maxLevelPctForClaimingExpReward, changed = ImGui.InputInt("Max Exp Level Claim Exp.",
+                    Settings.General.maxLevelPctForClaimingExpReward, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                if Settings.General.maxLevelPctForClaimingExpReward < 1 then Settings.General.maxLevelPctForClaimingExpReward = 1 end
+                if Settings.General.maxLevelPctForClaimingExpReward > 100 then Settings.General.maxLevelPctForClaimingExpReward = 100 end
+                uiutils.add_tooltip('Max Experience at Level To Claim Experience Rewards')
+                if (changed) then settings.SaveSettings() end
+                ImGui.PushItemWidth(100)
+                Settings.General.minimumSuccessPercent, changed = ImGui.InputInt("Mininum Success %",
+                    Settings.General.minimumSuccessPercent, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                if Settings.General.minimumSuccessPercent < 1 then Settings.General.minimumSuccessPercent = 0 end
+                if Settings.General.minimumSuccessPercent > 100 then Settings.General.minimumSuccessPercent = 100 end
+                uiutils.add_tooltip('Minimum Success % to Select Quest')
+                if (Settings.General.maxLevelUseCurrentCap) then
+                    ImGui.Unindent(20)
+                end
                 if (changed) then settings.SaveSettings() end
             end
-            ImGui.PushItemWidth(100)
-            Settings.General.maxLevelPctForClaimingExpReward, changed = ImGui.InputInt("Max Exp Level Claim Exp.",
-                Settings.General.maxLevelPctForClaimingExpReward, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-            if Settings.General.maxLevelPctForClaimingExpReward < 1 then Settings.General.maxLevelPctForClaimingExpReward = 1 end
-            if Settings.General.maxLevelPctForClaimingExpReward > 100 then Settings.General.maxLevelPctForClaimingExpReward = 100 end
-            uiutils.add_tooltip('Max Experience at Level To Claim Experience Rewards')
-            if (changed) then settings.SaveSettings() end
-            ImGui.PushItemWidth(100)
-            Settings.General.minimumSuccessPercent, changed = ImGui.InputInt("Mininum Success %",
-                Settings.General.minimumSuccessPercent, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
-            if Settings.General.minimumSuccessPercent < 1 then Settings.General.minimumSuccessPercent = 0 end
-            if Settings.General.minimumSuccessPercent > 100 then Settings.General.minimumSuccessPercent = 100 end
-            uiutils.add_tooltip('Minimum Success % to Select Quest')
-            if (Settings.General.maxLevelUseCurrentCap) then
-                ImGui.Unindent(20)
-            end
-            if (changed) then settings.SaveSettings() end
         end
 
-        if Settings.General.uiActions.useUiActionDelay ~= nil then
-            ImGui.Separator()
-            uiutils.text_colored(TextStyle.ItemValue, 'UI Actions')
-            ImGui.Separator()
-            Settings.General.uiActions.useUiActionDelay, changed = uiutils.add_setting_checkbox('Use UI Action Delay',
-                Settings.General.uiActions.useUiActionDelay,
-                'If selected, most UI actions impose a random delay between the two times specified below.\n\nCommand: useUiDelay')
-            if (changed) then settings.SetUiDelays() end
-        end
+        -- UI Actions section as collapsible header (only show inner fields if the section is open)
+        if ImGui.CollapsingHeader("UI Actions") then
+            if Settings.General.uiActions.useUiActionDelay ~= nil then
+                Settings.General.uiActions.useUiActionDelay, changed = uiutils.add_setting_checkbox('Use UI Action Delay',
+                    Settings.General.uiActions.useUiActionDelay,
+                    'If selected, most UI actions impose a random delay between the two times specified below.\n\nCommand: useUiDelay')
+                if (changed) then settings.SetUiDelays() end
 
-        if Settings.General.uiActions.useUiActionDelay then
-            ImGui.Indent(20)
-            Settings.General.uiActions.delayMinMs, changed = ImGui.InputInt("Minimum random delay (ms)",
-                Settings.General.uiActions.delayMinMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
-            uiutils.add_tooltip('Minimum random delay (ms) for most UI actions\n\nCommand: uiDelayMin')
-            if (changed) then settings.SetUiDelays() end
-            Settings.General.uiActions.delayMaxMs, changed = ImGui.InputInt("Maximum random delay (ms)",
-                Settings.General.uiActions.delayMaxMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
-            uiutils.add_tooltip('Maximum random delay (ms) for most UI actions\n\nCommand: uiDelayMax')
-            if (changed) then settings.SetUiDelays() end
-            ImGui.Unindent(20)
-        end
-
-        ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, 'Logging')
-        ImGui.Separator()
-
-        local logLevel, changed = ImGui.Combo("Log Level", Settings.General.logLevel, log_levels, #log_levels)
-        ImGui.PushItemWidth(100)
-        ImGui.SameLine()
-        ImGui.Text("'%s'", log_levels[Settings.General.logLevel])
-        if (changed) then settings.SetLogLevel(logLevel) end
-
-        ImGui.Separator()
-        uiutils.text_colored(TextStyle.ItemValue, 'Display')
-        ImGui.Separator()
-        Settings.Display.showDetailed, changed = uiutils.add_setting_checkbox('Show Additional UI Details',
-            Settings.Display.showDetailed, 'Displays additional details in the UI.')
-
-        ImGui.Separator()
-
-        -- Test Mode checkbox: sync runtime and persist; when disabling, also clear validation flags
-        local update_val, update_changed = uiutils.add_setting_checkbox('Enter Test Mode',
-            (Settings.Debug and Settings.Debug.allowTestMode) or false,
-            'Adds "Test" tab and enables test mode, add quests to database, update mismatches, and validate rewards.\n\nCommand: allowTestMode')
-
-        if update_changed then
-            Settings.Debug = Settings.Debug or {}
-            Settings.Debug.allowTestMode = update_val
-            -- sync runtime flag used by the UI and other modules
-            settings.InTestMode = update_val
-
-            -- If test mode was just turned OFF, also disable validation-related flags so they
-            -- don't remain enabled unintentionally.
-            if not update_val then
-                Settings.Debug.validateQuestRewardData = false
-                Settings.Debug.updateQuestDatabaseOnValidate = false
-
-                -- If your settings module keeps mirror runtime values, sync those too (defensive).
-                if settings.Debug then
-                    settings.Debug.validateQuestRewardData = false
-                    settings.Debug.updateQuestDatabaseOnValidate = false
+                if Settings.General.uiActions.useUiActionDelay then
+                    ImGui.Indent(20)
+                    Settings.General.uiActions.delayMinMs, changed = ImGui.InputInt("Minimum random delay (ms)",
+                        Settings.General.uiActions.delayMinMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
+                    uiutils.add_tooltip('Minimum random delay (ms) for most UI actions\n\nCommand: uiDelayMin')
+                    if (changed) then settings.SetUiDelays() end
+                    Settings.General.uiActions.delayMaxMs, changed = ImGui.InputInt("Maximum random delay (ms)",
+                        Settings.General.uiActions.delayMaxMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
+                    uiutils.add_tooltip('Maximum random delay (ms) for most UI actions\n\nCommand: uiDelayMax')
+                    if (changed) then settings.SetUiDelays() end
+                    ImGui.Unindent(20)
                 end
+            end
+        end
+        ImGui.Separator()
+
+        -- Logging section as collapsible header
+        if ImGui.CollapsingHeader("Logging") then
+            local logLevel, changed = ImGui.Combo("Log Level", Settings.General.logLevel, log_levels, #log_levels)
+            ImGui.PushItemWidth(100)
+            ImGui.SameLine()
+            ImGui.Text("'%s'", log_levels[Settings.General.logLevel])
+            if (changed) then settings.SetLogLevel(logLevel) end
+        end
+        ImGui.Separator()
+
+        -- Test Mode / Debug section as collapsible header
+        if ImGui.CollapsingHeader("Test Mode / Debug") then
+            local update_val, update_changed = uiutils.add_setting_checkbox('Enter Test Mode',
+                (Settings.Debug and Settings.Debug.allowTestMode) or false,
+                'Adds "Test" tab and enables test mode, add quests to database, update mismatches, and validate rewards.\n\nCommand: allowTestMode')
+
+            if update_changed then
+                Settings.Debug = Settings.Debug or {}
+                Settings.Debug.allowTestMode = update_val
+                -- sync runtime flag used by the UI and other modules
+                settings.InTestMode = update_val
+
+                -- If test mode was just turned OFF, also disable validation-related flags so they
+                -- don't remain enabled unintentionally.
+                if not update_val then
+                    Settings.Debug.validateQuestRewardData = false
+                    Settings.Debug.updateQuestDatabaseOnValidate = false
+
+                    -- If your settings module keeps mirror runtime values, sync those too (defensive).
+                    if settings.Debug then
+                        settings.Debug.validateQuestRewardData = false
+                        settings.Debug.updateQuestDatabaseOnValidate = false
+                    end
+
+                    if logger and logger.info then
+                        logger.info("Test mode disabled: cleared validateQuestRewardData and updateQuestDatabaseOnValidate")
+                    end
+                end
+
+                -- persist immediately
+                settings.SaveSettings()
 
                 if logger and logger.info then
-                    logger.info("Test mode disabled: cleared validateQuestRewardData and updateQuestDatabaseOnValidate")
+                    logger.info("Saved Settings.Debug.allowTestMode = %s", tostring(update_val))
                 end
-            end
-
-            -- persist immediately
-            settings.SaveSettings()
-
-            if logger and logger.info then
-                logger.info("Saved Settings.Debug.allowTestMode = %s", tostring(update_val))
             end
         end
 
@@ -733,6 +796,12 @@ local function RenderSettingsQuestsPriorityGroupSection(priorityName, config)
         ImGui.Separator()
 
         if (config.general.selectHighestExp == false) then
+            -- Moved: Show Additional UI Details (persisted setting)
+            Settings.Display = Settings.Display or {}
+            Settings.Display.showDetailed, changed = uiutils.add_setting_checkbox('Show Additional UI Details',
+            Settings.Display.showDetailed,
+            'Displays additional details in the UI (summary strings in quest priority views).')
+        if (changed) then settings.SaveSettings() end
             ImGui.Separator()
             questConfigType = ImGui.RadioButton("Simple##questConfigType", questConfigType or QuestConfigType.Simple,
                 QuestConfigType.Simple)
@@ -856,8 +925,13 @@ function RenderSettingsQuestsSimpleSection(priorityName, config)
     ImGui.Separator()
     uiutils.text_colored(TextStyle.ItemValue, 'Types')
     if (ShowDetailedUI()) then
-        ImGui.SameLine()
-        uiutils.text_colored(TextStyle.ItemValueDetail, Settings.QuestPriority.Types)
+    ImGui.SameLine()
+
+    -- Wrap at current cursor local X + 280 (window-local coordinate)
+    local wrap_x = ImGui.GetCursorPosX() + 280
+    ImGui.PushTextWrapPos(wrap_x)
+    uiutils.text_colored(TextStyle.ItemValueDetail, Settings.QuestPriority.Types)
+    ImGui.PopTextWrapPos()
     end
     config.types.exploration, changed = uiutils.add_setting_checkbox('Exploration', config.types.exploration)
     if (changed) then settings.SaveGroupPrioritySettings("types", priorityName) end
@@ -1285,9 +1359,9 @@ function RenderSpecificAgentCountSection(name, showType)
 
     -- Detect transitions and request a main window resize (applied in DrawMainWindow)
     if (not is_open and was_open) then
-        pending_window_size = { width = 300, height = 425 }
+        pending_window_size = { width = 300, height = 255 }
     elseif (is_open and not was_open) then
-        pending_window_size = { width = 500, height = 750 }
+        pending_window_size = { width = 300, height = 750 }
     end
 
     if not is_open then
@@ -1363,6 +1437,7 @@ end
 
 function RenderTestTab()
     if ImGui.BeginTabItem("Test") then
+
         local minutes, changed = ImGui.InputInt("Min Til Next Quest", MinutesUntilNextQuest, 1, 120,
             ImGuiInputTextFlags.EnterReturnsTrue)
         if (changed) then
@@ -1370,7 +1445,7 @@ function RenderTestTab()
             MinutesUntilNextQuest = minutes
             overseer.PostProcessNextRunTimes()
         end
-
+        
         local seconds, changed = ImGui.InputInt("Sec Til Next Rotation", SecondsUntilNextRotation, 1, 120,
             ImGuiInputTextFlags.EnterReturnsTrue)
         if (changed) then
@@ -1425,12 +1500,12 @@ function RenderTestTab()
             Settings.Debug.processFullQuestRewardData, 'Adds new quests to the local database.\n\nCommand: addToDatabase')
         if (changed) then settings.SaveSettings() end
         Settings.Debug.validateQuestRewardData, changed = uiutils.add_setting_checkbox("Validate Quest Reward Data",
-            Settings.Debug.validateQuestRewardData, 'Validates current quest exp matches stored exp.\n\nCommand: addToDatabase \n\nNOTE: Full System Walk (Takes a while)\nErrors are only logged to output window.')
+            Settings.Debug.validateQuestRewardData, 'Validates current quest exp matches stored exp.\n\nCommand: validateQuestRewardData \n\nNOTE: Full System Walk (Takes a while)\nErrors are only logged to output window.')
         if (changed) then settings.SaveSettings() end
         -- Add this near the other Debug UI items (after the Test Mode checkbox)
         local update_val, update_changed = uiutils.add_setting_checkbox('Update DB on validation mismatches',
     Settings.Debug and Settings.Debug.updateQuestDatabaseOnValidate or false,
-    'When enabled, mismatched quest reward values found during a validation pass will be written to the DB. Use with caution.')
+    'When enabled, \n\nCommand: updateQuestDatabaseOnValidate \n\nNOTE: mismatched quest reward values found during a validation pass will be written to the DB. Use with caution.')
 
         if update_changed then
             Settings.Debug = Settings.Debug or {}
@@ -1443,8 +1518,194 @@ function RenderTestTab()
         end
                 ImGui.Separator()
 
-                ImGui.EndTabItem()
+        ImGui.EndTabItem()
+    end
+end
+-- Remote tab (visible only when Test Mode is enabled)
+function RenderTestTab()
+    if ImGui.BeginTabItem("Test") then
+
+        -- Create a sub-tab bar inside the Test tab: Local (existing Test UI) and Remote (previously top-level)
+        if ImGui.BeginTabBar("OverseerTestSubTabBar", ImGuiTabBarFlags.Reorderable) then
+
+            -- Info sub-tab: inputs for minutes, seconds, level, name, game state, subscription level
+            if ImGui.BeginTabItem("Info") then
+                local minutes, changed = ImGui.InputInt("Min Til Next Quest", MinutesUntilNextQuest, 1, 120,
+                    ImGuiInputTextFlags.EnterReturnsTrue)
+                if (changed) then
+                    printf("Minutes: %s", minutes)
+                    MinutesUntilNextQuest = minutes
+                    overseer.PostProcessNextRunTimes()
+                end
+
+                local seconds, changed = ImGui.InputInt("Sec Til Next Rotation", SecondsUntilNextRotation, 1, 120,
+                    ImGuiInputTextFlags.EnterReturnsTrue)
+                if (changed) then
+                    printf("Seconds: %s", seconds)
+                    overseer.SetQuestRotationTimeSeconds(seconds)
+                end
+
+                local level, changed = ImGui.InputInt("Char Level", mqFacade.GetCharLevel(), 1, 120,
+                    ImGuiInputTextFlags.EnterReturnsTrue)
+                if (changed) then
+                    printf("Level: %s", level)
+                    mqFacade.SetCharLevel(level)
+                end
+
+                local name, changed = ImGui.InputText("Char Name", mqFacade.GetCharNameAndClass(),
+                    ImGuiInputTextFlags.EnterReturnsTrue)
+                if (changed) then
+                    printf("Name: %s", name)
+                    mqFacade.SetCharName(name)
+                end
+
+                -- Use ComboSelectString helper to present ordered options and return the chosen string.
+                ComboSelectString("Game State", mqFacade.GetGameState(), game_states, function(sel)
+                    mqFacade.SetGameState(sel)
+                end)
+
+                ComboSelectString("Subscription Level", mqFacade.GetSubscriptionLevel(), subscription_levels, function(sel)
+                    mqFacade.SetSubscriptionLevel(sel)
+                end)
+                ImGui.Separator()
+
+                ImGui.EndTabItem() -- Info
             end
+
+            -- Local sub-tab: original Test tab content
+            if ImGui.BeginTabItem("Local") then
+
+                ImGui.TextColored(0.9, 0.9, 0.2, 1.0, "Commands Here Are Ran Local (Only You).")
+                ImGui.Separator()
+
+                local run_tests_label = string.format('%s %s', icons.MD_PLAY_CIRCLE_FILLED, 'Run Unit Tests')
+                if ImGui.Button(run_tests_label) then
+                    tests.RunTests()
+                end
+                uiutils.add_tooltip('Run unit tests')
+
+                local sample_log_label = string.format('%s %s', icons.MD_PLAY_CIRCLE_FILLED, 'Sample Log Output')
+                if ImGui.Button(sample_log_label) then
+                    logger.output_test_logs()
+                end
+                uiutils.add_tooltip('Emit sample log messages')
+
+                -- Start Full Cycle button: icon + text via helper
+                uiutils.add_icon_action_button(icons.MD_PLAY_CIRCLE_FILLED, 'Start Full Cycle', 'FullCycle',
+                    'Starts a full Overseer cycle (equivalent to the FullCycle action)')
+
+                ImGui.Separator()
+                uiutils.text_colored(TextStyle.SubSectionTitleCallout, "Database")
+                Settings.Debug.processFullQuestRewardData, changed = uiutils.add_setting_checkbox("Add Quests to Database",
+                    Settings.Debug.processFullQuestRewardData, 'Adds new quests to the local database.\n\nCommand: addToDatabase')
+                if (changed) then settings.SaveSettings() end
+                Settings.Debug.validateQuestRewardData, changed = uiutils.add_setting_checkbox("Validate Quest Reward Data",
+                    Settings.Debug.validateQuestRewardData, 'Validates current quest exp matches stored exp.\n\nCommand: validateQuestRewardData \n\nNOTE: Full System Walk (Takes a while)\nErrors are only logged to output window.')
+                if (changed) then settings.SaveSettings() end
+
+                local update_val, update_changed = uiutils.add_setting_checkbox('Update DB on validation mismatches',
+                    Settings.Debug and Settings.Debug.updateQuestDatabaseOnValidate or false,
+                    'When enabled, \n\nCommand: updateQuestDatabaseOnValidate \n\nNOTE: mismatched quest reward values found during a validation pass will be written to the DB. Use with caution.')
+
+                if update_changed then
+                    Settings.Debug = Settings.Debug or {}
+                    Settings.Debug.updateQuestDatabaseOnValidate = update_val
+                    settings.SaveSettings()
+                    if logger and logger.info then
+                        logger.info("\arWarning! \atSaved Settings to Overwrite Database = %s", tostring(update_val))
+                    end
+                end
+
+                ImGui.Separator()
+
+                ImGui.EndTabItem() -- Local
+            end
+
+            -- Remote sub-tab: moved here from the former top-level RenderRemoteTab
+            if ImGui.BeginTabItem("Remote") then
+                ImGui.TextColored(0.9, 0.9, 0.2, 1.0, "Sends Remote Commands To All Toons.")
+                ImGui.Separator()
+
+                if ImGui.Button(string.format('Test Mode On %s', icons.FA_TOGGLE_ON)) then
+                    mq.cmd('/dgza /mqoverseer allowTestMode on')
+                    if logger and logger.info then
+                        logger.info('All toons sent allowTestMode On command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Test Mode On')
+                ImGui.SameLine()
+                if ImGui.Button(string.format('Test Mode Off %s', icons.FA_TOGGLE_OFF)) then
+                    mq.cmd('/dgza /mqoverseer allowTestMode off')
+                    if logger and logger.info then
+                        logger.info('All toons sent allowTestMode Off command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Test Mode Off')
+
+                if ImGui.Button(string.format('Add To DB On %s', icons.FA_TOGGLE_ON)) then
+                    mq.cmd('/dgza /mqoverseer addToDatabase on')
+                    if logger and logger.info then
+                        logger.info('All toons sent addToDatabase On command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Add To Database On')
+                ImGui.SameLine()
+                if ImGui.Button(string.format('Add To DB Off %s', icons.FA_TOGGLE_OFF)) then
+                    mq.cmd('/dgza /mqoverseer addToDatabase off')
+                    if logger and logger.info then
+                        logger.info('All toons sent addToDatabase Off command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Add To Database Off')
+
+                if ImGui.Button(string.format('Validate Data On %s', icons.FA_TOGGLE_ON)) then
+                    mq.cmd('/dgza /mqoverseer validateQuestRewardData on')
+                    if logger and logger.info then
+                        logger.info('All toons sent validateQuestRewardData On command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Validate Data On')
+                ImGui.SameLine()
+                if ImGui.Button(string.format('Validate Data Off %s', icons.FA_TOGGLE_OFF)) then
+                    mq.cmd('/dgza /mqoverseer validateQuestRewardData off')
+                    if logger and logger.info then
+                        logger.info('All toons sent validateQuestRewardData Off command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Validate Data Off')
+
+                if ImGui.Button(string.format('Update DB On %s', icons.FA_TOGGLE_ON)) then
+                    mq.cmd('/dgza /mqoverseer updateQuestDatabaseOnValidate on')
+                    if logger and logger.info then
+                        logger.info('All toons sent updateQuestDatabaseOnValidate On command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Update Database On')
+                ImGui.SameLine()
+                if ImGui.Button(string.format('Update DB Off %s', icons.FA_TOGGLE_OFF)) then
+                    mq.cmd('/dgza /mqoverseer updateQuestDatabaseOnValidate off')
+                    if logger and logger.info then
+                        logger.info('All toons sent updateQuestDatabaseOnValidate Off command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Update Database Off')
+
+                if ImGui.Button(string.format('runFullCycle %s', icons.FA_TOGGLE_ON)) then
+                    mq.cmd('/dgza /mqoverseer runFullCycle')
+                    if logger and logger.info then
+                        logger.info('All toons sent Run Full Cycle command.')
+                    end
+                end
+                uiutils.add_tooltip('Send to all toons Run Full Cycle')
+
+                ImGui.Separator()
+                ImGui.EndTabItem() -- Remote
+            end
+
+            ImGui.EndTabBar() -- OverseerTestSubTabBar
         end
 
+        ImGui.EndTabItem() -- Test
+    end
+end
 return actions
