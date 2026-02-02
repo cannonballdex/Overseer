@@ -1278,31 +1278,75 @@ function LoadAvailableQuestsExperience(quest_name)
 end
 
 function LoadAvailableQuestsExtraData(quest_name)
-	mqutils.leftmouseup('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_PreviewRewardButton')
-	mq.delay(1000, function() return mq.TLO.Rewards.Reward(1).Text() == quest_name end)
+    mqutils.leftmouseup('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_PreviewRewardButton')
+    mq.delay(1000, function() return mq.TLO.Rewards.Reward(1).Text() == quest_name end)
 
-	local reward = mq.TLO.Rewards.Reward(1)
-	local questName = reward.Text()
+    local reward = mq.TLO.Rewards.Reward(1)
+    local questName = reward.Text()
 
-	reward_select_item(1, 1, 5)
+    reward_select_item(1, 1, 5)
 
-	local rewardDescription = mq.TLO.Window('RewardSelectionWnd/RewardPageTabWindow').Tab(questName).Child('RewardSelectionDescriptionArea').Text()
-	local experience, mercenaryAas = rewardDescription:match("([^%%]*)%%[a-zA-Z0-9 ]* and ([0-9.]*)")
+    -- Be defensive: the Window / Tab / Child may not exist or Text() may be nil
+    local rewardDescNode = mq.TLO.Window('RewardSelectionWnd/RewardPageTabWindow').Tab(questName).Child('RewardSelectionDescriptionArea')
+    local rewardDescription = nil
+    if rewardDescNode and rewardDescNode.Text then
+        rewardDescription = rewardDescNode.Text()
+    end
 
-	-- Two possible descriptions of Merc AA's.  One for < 1%, other >= 1%.
-	if (string_utils.ends_with(rewardDescription, "t.") == true) then
-		local exp = tonumber(mercenaryAas);
-		exp = exp / 100
-		mercenaryAas = exp
-	end
+    if not rewardDescription or rewardDescription == '' then
+        if logger and logger.warning then
+            logger.warning("LoadAvailableQuestsExtraData: missing rewardDescription for quest '%s' (preview tab may not exist)", tostring(quest_name))
+        end
+        -- Set sensible defaults and skip further parsing
+        AllAvailableQuests[AvailableQuestCount].experience = nil
+        AllAvailableQuests[AvailableQuestCount].mercenaryAas = nil
+    else
+        -- Try the expected pattern first. Match may fail -> handle gracefully.
+        local experience_str, mercenaryAas_str = rewardDescription:match("([^%%]*)%%[a-zA-Z0-9 ]* and ([0-9.]*)")
 
-	AllAvailableQuests[AvailableQuestCount].experience = tonumber(experience)
-	AllAvailableQuests[AvailableQuestCount].mercenaryAas = mercenaryAas
+        -- Fallback: try to extract a plain number for experience if the primary pattern didn't match
+        if not experience_str or experience_str == '' then
+            experience_str = rewardDescription:match("([0-9,]+)%s*exp") or rewardDescription:match("([0-9,]+)%s*experience")
+        end
 
-	reward_select_option(1, 2)
-	local tetraOption = reward.Item(5)
-	local bits = string_utils.split(tetraOption.Text(), ' ')
-	AllAvailableQuests[AvailableQuestCount].tetradrachms = bits[1]
+        -- Normalize numeric strings (remove commas/spaces)
+        if type(experience_str) == 'string' then
+            experience_str = experience_str:gsub(',', ''):match('%d+%.?%d*') or experience_str:match('%d+')
+        end
+        if type(mercenaryAas_str) == 'string' then
+            mercenaryAas_str = mercenaryAas_str:gsub(',', ''):match('%d+%.?%d*') or mercenaryAas_str:match('%d+')
+        end
+
+        local experience = tonumber(experience_str)
+        local mercenaryAas = tonumber(mercenaryAas_str)
+
+        -- Two possible descriptions of Merc AA's. One for < 1%, other >= 1%.
+        -- Only run the percent conversion if we actually parsed a mercenary value.
+        if mercenaryAas and string_utils.ends_with(rewardDescription, "t.") == true then
+            mercenaryAas = mercenaryAas / 100
+        end
+
+        AllAvailableQuests[AvailableQuestCount].experience = experience
+        AllAvailableQuests[AvailableQuestCount].mercenaryAas = mercenaryAas
+    end
+
+    -- Select tetra option and parse tetradrachm count defensively
+    reward_select_option(1, 2)
+    local tetraOption = nil
+    if reward and reward.Item then
+        local ok, item = pcall(function() return reward.Item(5) end)
+        if ok then tetraOption = item end
+    end
+
+    if tetraOption and tetraOption.Text then
+        local bits = string_utils.split(tetraOption.Text(), ' ')
+        AllAvailableQuests[AvailableQuestCount].tetradrachms = bits[1]
+    else
+        if logger and logger.warning then
+            logger.warning("LoadAvailableQuestsExtraData: missing tetra option for quest '%s'", tostring(quest_name))
+        end
+        AllAvailableQuests[AvailableQuestCount].tetradrachms = nil
+    end
 end
 
 function LoadAvailableQuests(loadExtraData)
@@ -1477,9 +1521,17 @@ do
 end
 
 	::doneWithThisNode::
-	if (NODE.Siblings()) then
-		NODE = NODE.Next
-		goto nextNodeX
+	do
+		-- Guard the Siblings() call so we don't error when the field is missing or the TLO accessor fails.
+		local ok, hasSiblings = false, false
+		if NODE and NODE.Siblings then
+			ok, hasSiblings = pcall(function() return NODE.Siblings() end)
+		end
+
+		if ok and hasSiblings then
+			NODE = NODE.Next
+			goto nextNodeX
+		end
 	end
 
 	if mq.TLO.Window('RewardSelectionWnd').Open() then
