@@ -13,6 +13,15 @@ local actions = {}
 local Version = 'Beta 5.0'
 local MyIni = 'Overseer.lua'
 
+local __change_callbacks = {}
+
+-- Settings change callbacks
+local __change_callbacks = {}
+
+function RegisterSettingsChangeCallback(fn)
+    if type(fn) == 'function' then table.insert(__change_callbacks, fn) end
+end
+
 actions.InTestMode = false
 
 --- @type boolean
@@ -37,6 +46,9 @@ SettingsTemp = {}
 
 function actions.SaveSettings()
 	persistence.store(MyIniPath, Settings)
+	for _, cb in ipairs(__change_callbacks) do
+		pcall(cb) -- protect callback errors from breaking SaveSettings
+	end
 end
 
 function ReorderCollectionUp(collection, index)
@@ -228,6 +240,7 @@ local function save_quest_priority_durations(old, new)
 
 	local isFirst = true
 	old.Durations = ""
+	old.Durations, isFirst = concatenate(new.durations.h3, old.Durations, "3h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h6, old.Durations, "6h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h12, old.Durations, "12h", isFirst)
 	old.Durations, isFirst = concatenate(new.durations.h24, old.Durations, "24h", isFirst)
@@ -309,6 +322,7 @@ local function load_settings_temp_questpriorities_item(legacySectionName, priori
 	if (not old.Durations) then split = nil
 	else split = utils.split(old.Durations, '|')	end
 	new.durations = {
+		h3 = has_item(split, "3h") or has_item(split, "Any"),
 		h6 = has_item(split, "6h") or has_item(split, "Any"),
 		h12 = has_item(split, "12h") or has_item(split, "Any"),
 		h24 = has_item(split, "24h") or has_item(split, "Any"),
@@ -608,6 +622,7 @@ local function ensure_ini_defaults()
 						h24 = true,
 						h12 = true,
 						h6 = true,
+						h3 = true,
 					},
 					levels = {
 						level1 = true,
