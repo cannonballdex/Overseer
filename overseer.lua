@@ -1491,11 +1491,32 @@ do
     -- If either experience or success mismatches, log and optionally update DB (single update)
     if exp_mismatch or success_mismatch then
         if exp_mismatch then
-            logger.error('\ar EXP (experience) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
+            logger.error('\arEXP (experience) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
         end
         if success_mismatch then
-            logger.error('\ar SUCCESS (successRate) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_success_norm), tostring(ui_success_norm))
+            logger.error('\arSUCCESS (successRate) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_success_norm), tostring(ui_success_norm))
         end
+		if success_mismatch then
+			logger.error('\arMERCENARY (mercenaryAas) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.mercenaryAas), tostring(current_quest.mercenaryAas))
+		end
+		if success_mismatch then
+			logger.error('\arTETRADRACHMS (tetradrachms) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.tetradrachms), tostring(current_quest.tetradrachms))
+		end
+		if success_mismatch then
+			logger.error('\arDURATION (duration) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.duration), tostring(current_quest.duration))
+		end
+		if success_mismatch then
+			logger.error('\arRARITY (rarity) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.rarity), tostring(current_quest.rarity))
+		end
+		if success_mismatch then
+			logger.error('\arTYPE (type) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.type), tostring(current_quest.type))
+		end
+		if success_mismatch then
+			logger.error('\arLEVEL (level) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.level), tostring(current_quest.level))
+		end
+		if success_mismatch then
+			logger.error('\arNAME (name) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.name), tostring(current_quest.name))
+		end
 
         if Settings.Debug.updateQuestDatabaseOnValidate then
             logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
@@ -1508,7 +1529,7 @@ do
             -- current_quest.experience already contains the current UI value
             db.UpdateQuestDetails(questName, current_quest)
         else
-            logger.error('    \at Not updating database at all for this quest.')
+            logger.error('\atNot updating database at all for this quest.')
         end
 
     elseif (not db_exp_present and db_success_norm == nil and Settings.Debug.processFullQuestRewardData == true) then
