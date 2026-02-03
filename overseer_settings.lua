@@ -221,11 +221,6 @@ end
 local function save_quest_priority_rarities(old, new)
 	if (not old or not new) then return end
 
-	-- if (new.rarities.elite and new.rarities.rare and new.rarities.uncommon and new.rarities.common and new.rarities.easy) then
-	-- 	old.Rarities = "Any"
-	-- 	return
-	-- end
-
 	local isFirst = true
 	old.Rarities = ""
 	old.Rarities, isFirst = concatenate(new.rarities.elite, old.Rarities, "Elite", isFirst)
@@ -558,13 +553,14 @@ local function ensure_ini_defaults()
 				agentCountForConversionCommon = 2,
 				agentCountForConversionUncommon = 2,
 				agentCountForConversionRare = 2,
+				agentCountForRetireElite = 99,
 				showUi = true,
 				autoRestartEachCycle = false,
 				runFullCycleOnStartup = false,
 				campAfterFullCycle = false,
 				campAfterFullCycleFastCamp = false,
 				pauseOnCharacterChange = false,
-				convertEliteAgents = false,
+				retireEliteAgents = false,
 				ForceCompletedAchievementQuests = false,
 				uiActions = {
 					useDelay = false,
