@@ -921,35 +921,112 @@ function SkipRewardOption(rewardOptionName)
 end
 
 local function collect_reward_option(option, rewardItem, rewardOptionName, rewardIndex)
-	local retry_attempts = 1
+    local retry_attempts = 1
 
-	::retryOptionClaim::
-	option.Select()
+    ::retryOptionClaim::
+    option.Select()
 
-	logger.info('Claiming \ay%s\ao (\ag%s\ao)', option.Text(), rewardItem.Text())
-	mq.delay(2000, function() return option.Selected() == true and option.Text() == rewardOptionName end)
+    logger.info('Claiming \ay%s\ao (\ag%s\ao)', option.Text(), rewardItem.Text())
+    mq.delay(2000, function() return option.Selected() == true and option.Text() == rewardOptionName end)
 
-	--- TEMP logic to detect not-select option
-	if (option.Selected() == false or option.Text() ~= rewardOptionName) then
-		if (retry_attempts <= 0) then
-			logger.warning('Unable to select option. Starting reward collection from the top.')
-			return false
-		end
+    --- TEMP logic to detect not-select option
+    if (option.Selected() == false or option.Text() ~= rewardOptionName) then
+        if (retry_attempts <= 0) then
+            logger.warning('Unable to select option. Starting reward collection from the top.')
+            return false
+        end
 
-		retry_attempts = retry_attempts - 1
-		logger.info('Option selection issue.  Attempting again.')
-		mqutils.action(mq.TLO.Rewards.Reward(rewardIndex).Option(rewardOptionName).Select)
-		goto retryOptionClaim
-	elseif (option.Text() ~= rewardOptionName) then
-		-- Verify the selected option is the one we want
-		logger.info('Incorrect option selected (\ay%s\ao). Skipping.', option.Text())
-		return false
-	end
+        retry_attempts = retry_attempts - 1
+        logger.info('Option selection issue.  Attempting again.')
+        mqutils.action(mq.TLO.Rewards.Reward(rewardIndex).Option(rewardOptionName).Select)
+        goto retryOptionClaim
+    elseif (option.Text() ~= rewardOptionName) then
+        -- Verify the selected option is the one we want
+        logger.info('Incorrect option selected (\ay%s\ao). Skipping.', option.Text())
+        return false
+    end
 
-	rewardItem.Claim()
-	mq.delay(100)
-	if mq.TLO.Cursor.ID() then mqutils.autoinventory() end
-	return true
+    -- Claim the reward (may place an item on the cursor)
+    rewardItem.Claim()
+
+    -- Small initial delay to let the client/server update cursor state
+    mq.delay(150)
+
+    -- Robust cursor-clear routine
+    local cleared = false
+    local attempts = 0
+    local max_attempts = 30 -- ~6 seconds with 200ms sleeps
+
+    while attempts < max_attempts do
+        attempts = attempts + 1
+
+        -- Read cursor info defensively
+        local ok_id, cursor_id = pcall(function() return mq.TLO.Cursor.ID() end)
+        local ok_name, cursor_name = pcall(function() return mq.TLO.Cursor.Name() end)
+        local cid = (ok_id and cursor_id) and tostring(cursor_id) or "<nil>"
+        local cname = (ok_name and cursor_name) and tostring(cursor_name) or "<nil>"
+
+        if logger and logger.trace then
+            logger.trace("collect_reward_option: clear attempt %d, Cursor.ID=%s, Cursor.Name=%s", attempts, cid, cname)
+        end
+
+        -- If cursor empty, done
+        if ok_id and (cursor_id == nil or cursor_id == 0) then
+            cleared = true
+            break
+        end
+
+        -- Try helper autoinventory (try both signatures)
+        local ok_ai = pcall(function() mqutils.autoinventory(true) end)
+        if not ok_ai then pcall(function() mqutils.autoinventory() end) end
+
+        mq.delay(200)
+
+        -- Re-check
+        ok_id, cursor_id = pcall(function() return mq.TLO.Cursor.ID() end)
+        if ok_id and (cursor_id == nil or cursor_id == 0) then
+            cleared = true
+            break
+        end
+
+        -- Try MQ command fallback
+        pcall(function() mq.cmd('/autoinv') end)
+        mq.delay(200)
+
+        -- If ItemDisplayWindow is open it might block behaviour; try closing it
+        local ok_win, win_open = pcall(function() return mq.TLO.Window('ItemDisplayWindow').Open() end)
+        if ok_win and win_open then
+            pcall(function() mq.cmd('/windowstate ItemDisplayWindow close') end)
+            mq.delay(150)
+        end
+
+        -- Final quick check this iteration
+        ok_id, cursor_id = pcall(function() return mq.TLO.Cursor.ID() end)
+        if ok_id and (cursor_id == nil or cursor_id == 0) then
+            cleared = true
+            break
+        end
+
+        -- give server/client a bit more time
+        mq.delay(200)
+    end
+
+    if not cleared then
+        -- Log final state to aid debugging
+        local ok_fid, final_id = pcall(function() return mq.TLO.Cursor.ID() end)
+        local ok_fname, final_name = pcall(function() return mq.TLO.Cursor.Name() end)
+        local fid = (ok_fid and final_id) and tostring(final_id) or "<nil>"
+        local fn = (ok_fname and final_name) and tostring(final_name) or "<nil>"
+        if logger and logger.warning then
+            logger.warning("collect_reward_option: cursor still holds item after %d attempts (Cursor.ID=%s, Name=%s, reward=%s)",
+                max_attempts, fid, fn, tostring(rewardItem and rewardItem.Text and pcall(function() return rewardItem:Text() end) and rewardItem:Text() or "<unknown>"))
+        else
+            print(string.format("collect_reward_option: cursor still holds item after %d attempts (Cursor.ID=%s, Name=%s)",
+                max_attempts, fid, fn))
+        end
+    end
+
+    return true
 end
 
 local function IsClaimableReward(rewardItem)
@@ -986,7 +1063,29 @@ function CollectSpecificReward(rewardItem, rewardIndex, gather_exp_list_only, re
 	if (IsClaimableReward(rewardItem)) then
 		logger.info('Claiming ' .. rewardItem.Text())
 		rewardItem.Claim()
-		if mq.TLO.Cursor.ID() then mqutils.autoinventory() end
+		mq.delay(100)
+
+		-- Ensure anything placed on the cursor is moved to inventory (retry loop + fallback)
+		local attempts = 0
+		while mq.TLO.Cursor.ID() and mq.TLO.Cursor.ID() ~= 0 and attempts < 6 do
+			mqutils.autoinventory()
+			mq.delay(200)
+			attempts = attempts + 1
+		end
+
+		-- Final fallback to the command if helper didn't clear it
+		if mq.TLO.Cursor.ID() and mq.TLO.Cursor.ID() ~= 0 then
+			mq.cmd('/autoinv')
+			mq.delay(200)
+		end
+
+		if mq.TLO.Cursor.ID() and mq.TLO.Cursor.ID() ~= 0 then
+			if logger and logger.warning then
+				logger.warning("ClaimSpecificReward: cursor still holds item after autoinventory attempts (reward=%s, Cursor.ID=%s)",
+					tostring(rewardItem and rewardItem.Text and rewardItem:Text() or "<unknown>"),
+					tostring(mq.TLO.Cursor.ID()))
+			end
+		end
 
 		return ClaimReward_Successful
 	end
@@ -1359,6 +1458,7 @@ function LoadAvailableQuests(loadExtraData)
 	local current_quest
 	local NODE = mq.TLO.Window(AvailableQuestList).FirstChild
 	local database_exp_amount = nil
+	local db_saved = nil
 
 	AvailableQuestCount = 0
 	QuestRunOrder = 0
@@ -1394,25 +1494,37 @@ function LoadAvailableQuests(loadExtraData)
 
 	AvailableQuestCount = AvailableQuestCount + 1
 
-	 if (Settings.General.useQuestDatabase == true) then
-    -- LOAD FROM DB.  i.e. "Do we already know about this one"
-    logger.trace("\aoDB: \ayQuerying for quest details: %s", tostring(questName))
+	if (Settings.General.useQuestDatabase == true) then
+		-- LOAD FROM DB.  i.e. "Do we already know about this one"
+		logger.trace("\aoDB: \ayQuerying for quest details: %s", tostring(questName))
 
-	-- Log DB path once, on first actual DB use
-	if not _db_path_logged and db and type(db.GetDbPath) == 'function' then
-		local p = db.GetDbPath()
-		if p and p ~= '' then
-			logger.info("Using DB file for queries: %s", tostring(p))
+		-- Log DB path once, on first actual DB use
+		if not _db_path_logged and db and type(db.GetDbPath) == 'function' then
+			local p = db.GetDbPath()
+			if p and p ~= '' then
+				logger.info("Using DB file for queries: %s", tostring(p))
+			end
+			_db_path_logged = true
 		end
-		_db_path_logged = true
-	end
 
-	current_quest = db.GetQuestDetails(questName)
+		current_quest = db.GetQuestDetails(questName)
 		if (current_quest ~= nil) then
 			logger.trace("\agDB: \ayFound quest in DB: %s (exp=%s, type=%s)", tostring(current_quest.name), tostring(current_quest.experience), tostring(current_quest.type))
 			AllAvailableQuests[AvailableQuestCount] = current_quest
 			current_quest.available = true
 			database_exp_amount = current_quest.experience
+
+			-- prepare a place to stash DB-original values so we can compare later (do minimal necessary)
+			db_saved = {}
+			db_saved.successRate = current_quest.successRate
+			db_saved.experience = current_quest.experience
+			db_saved.mercenaryAas = current_quest.mercenaryAas
+			db_saved.tetradrachms = current_quest.tetradrachms
+			db_saved.duration = current_quest.duration
+			db_saved.rarity = current_quest.rarity
+			db_saved.type = current_quest.type
+			db_saved.level = current_quest.level
+			db_saved.name = current_quest.name
 
 			if (not Settings.Debug.validateQuestRewardData) then
 				goto doneWithThisNode
@@ -1455,90 +1567,98 @@ function LoadAvailableQuests(loadExtraData)
 
 	-- if DB has an entry and values differ:
 	-- Updated validation/update handling:
--- if DB has an entry and values differ:
--- Updated validation/update handling (expand to include successRate)
 do
-    -- Helper: normalize a UI/DB success string to a numeric-string (no '%') or nil
-    local function normalize_success_raw(raw)
-        if raw == nil then return nil end
-        local s = tostring(raw):gsub("^%s+", ""):gsub("%s+$", "")
-        s = s:gsub("%%$", "") -- remove trailing percent sign if present
-        if s == '' then return nil end
-        local n = tonumber(s)
-        if n then
-            -- store as simple numeric string (e.g. "75")
-            return tostring(n)
-        end
-        -- fallback: return trimmed string if not numeric
-        return s
-    end
+	-- Helper: normalize a UI/DB success string to a numeric-string (no '%') or nil
+	local function normalize_success_raw(raw)
+		if raw == nil then return nil end
+		local s = tostring(raw):gsub("^%s+", ""):gsub("%s+$", "")
+		s = s:gsub("%%$", "") -- remove trailing percent sign if present
+		if s == '' then return nil end
+		local n = tonumber(s)
+		if n then
+			-- store as simple numeric string (e.g. "75")
+			return tostring(n)
+		end
+		-- fallback: return trimmed string if not numeric
+		return s
+	end
 
-    local db_exp_present = (database_exp_amount ~= nil)
-    local exp_mismatch = (Settings.Debug.validateQuestRewardData and db_exp_present and database_exp_amount ~= current_quest.experience)
+	-- read UI success text (try same widget path used elsewhere)
+	local ui_success_text = nil
+	local ok_s, val_s = pcall(function() return mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text() end)
+	if ok_s and val_s and tostring(val_s) ~= 'NULL' then
+		ui_success_text = val_s
+	end
 
-    -- read UI success text (try same widget path used elsewhere)
-    local ui_success_text = nil
-    local ok_s, val_s = pcall(function() return mq.TLO.Window('OverseerWnd/OW_OverseerQuestsPage/OW_ALL_SuccessValue').Text() end)
-    if ok_s and val_s and tostring(val_s) ~= 'NULL' then
-        ui_success_text = val_s
-    end
+	-- use DB-saved originals (db_saved) for comparisons; fall back to nil if not present
+	local db_success_norm = normalize_success_raw((db_saved and db_saved.successRate) or nil)
+	local ui_success_norm = normalize_success_raw(ui_success_text)
+	local db_exp_present = (database_exp_amount ~= nil)
+	local exp_mismatch = (Settings.Debug.validateQuestRewardData and db_exp_present and database_exp_amount ~= current_quest.experience)
 
-    local db_success_norm = normalize_success_raw(current_quest.successRate)
-    local ui_success_norm = normalize_success_raw(ui_success_text)
+	-- fixed: compare DB value to UI value (normalized)
+	local success_mismatch = (Settings.Debug.validateQuestRewardData and db_success_norm ~= nil and db_success_norm ~= ui_success_norm)
 
-    local success_mismatch = (Settings.Debug.validateQuestRewardData and db_success_norm ~= nil and db_success_norm ~= ui_success_norm)
+	-- other fields: compare saved DB original vs current_quest (UI-derived). Use tostring/tonumber to avoid nil errors.
+	local mercenaryAas_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.mercenaryAas ~= nil and tonumber(db_saved.mercenaryAas) ~= tonumber(current_quest.mercenaryAas))
+	local tetradrachms_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.tetradrachms ~= nil and tostring(db_saved.tetradrachms) ~= tostring(current_quest.tetradrachms))
+	local duration_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.duration ~= nil and tostring(db_saved.duration) ~= tostring(current_quest.duration))
+	local rarity_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.rarity ~= nil and tostring(db_saved.rarity) ~= tostring(current_quest.rarity))
+	local type_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.type ~= nil and tostring(db_saved.type) ~= tostring(current_quest.type))
+	local level_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.level ~= nil and tostring(db_saved.level) ~= tostring(current_quest.level))
+	local name_mismatch = (Settings.Debug.validateQuestRewardData and db_saved and db_saved.name ~= nil and tostring(db_saved.name) ~= tostring(current_quest.name))
 
-    -- If either experience or success mismatches, log and optionally update DB (single update)
-    if exp_mismatch or success_mismatch then
-        if exp_mismatch then
-            logger.error('\arEXP (experience) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
-        end
-        if success_mismatch then
-            logger.error('\arSUCCESS (successRate) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_success_norm), tostring(ui_success_norm))
-        end
-		if success_mismatch then
-			logger.error('\arMERCENARY (mercenaryAas) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.mercenaryAas), tostring(current_quest.mercenaryAas))
+	-- If either experience or success mismatches, log and optionally update DB (single update)
+	if exp_mismatch or success_mismatch then
+		if exp_mismatch then
+			logger.error('\arEXP (experience) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, database_exp_amount, current_quest.experience)
 		end
 		if success_mismatch then
-			logger.error('\arTETRADRACHMS (tetradrachms) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.tetradrachms), tostring(current_quest.tetradrachms))
+			logger.error('\arSUCCESS (successRate) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_success_norm), tostring(ui_success_norm))
 		end
-		if success_mismatch then
-			logger.error('\arDURATION (duration) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.duration), tostring(current_quest.duration))
+		if mercenaryAas_mismatch then
+			logger.error('\arMERCENARY (mercenaryAas) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.mercenaryAas), tostring(current_quest.mercenaryAas))
 		end
-		if success_mismatch then
-			logger.error('\arRARITY (rarity) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.rarity), tostring(current_quest.rarity))
+		if tetradrachms_mismatch then
+			logger.error('\arTETRADRACHMS (tetradrachms) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.tetradrachms), tostring(current_quest.tetradrachms))
 		end
-		if success_mismatch then
-			logger.error('\arTYPE (type) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.type), tostring(current_quest.type))
+		if duration_mismatch then
+			logger.error('\arDURATION (duration) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.duration), tostring(current_quest.duration))
 		end
-		if success_mismatch then
-			logger.error('\arLEVEL (level) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.level), tostring(current_quest.level))
+		if rarity_mismatch then
+			logger.error('\arRARITY (rarity) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.rarity), tostring(current_quest.rarity))
 		end
-		if success_mismatch then
-			logger.error('\arNAME (name) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(current_quest.name), tostring(current_quest.name))
+		if type_mismatch then
+			logger.error('\arTYPE (type) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.type), tostring(current_quest.type))
+		end
+		if level_mismatch then
+			logger.error('\arLEVEL (level) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.level), tostring(current_quest.level))
+		end
+		if name_mismatch then
+			logger.error('\arNAME (name) VIOLATION: \aw Quest \ag%s\aw in database as \ay%s\aw but current \ay%s', current_quest.name, tostring(db_saved and db_saved.name), tostring(current_quest.name))
 		end
 
-        if Settings.Debug.updateQuestDatabaseOnValidate then
-            logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
-            -- ensure we write the normalized UI successRate into the model
-            if ui_success_norm ~= nil then
-                current_quest.successRate = ui_success_norm
-            else
-                current_quest.successRate = '' -- keep same DB semantics as sql_escape(nil) -> ''
-            end
-            -- current_quest.experience already contains the current UI value
-            db.UpdateQuestDetails(questName, current_quest)
-        else
-            logger.error('\atNot updating database at all for this quest.')
-        end
+		if Settings.Debug.updateQuestDatabaseOnValidate then
+			logger.info('Updating database for quest %s because Debug.updateQuestDatabaseOnValidate = true', current_quest.name)
+			-- ensure we write the normalized UI successRate into the model
+			if ui_success_norm ~= nil then
+				current_quest.successRate = ui_success_norm
+			else
+				current_quest.successRate = '' -- keep same DB semantics as sql_escape(nil) -> ''
+			end
+			-- current_quest.experience already contains the current UI value
+			db.UpdateQuestDetails(questName, current_quest)
+		else
+			logger.error('\atNot updating database at all for this quest.')
+		end
 
-    elseif (not db_exp_present and db_success_norm == nil and Settings.Debug.processFullQuestRewardData == true) then
-        -- If DB has no record for experience AND no stored successRate, and ingestion is enabled, add the quest
-        if ui_success_norm ~= nil then
-            current_quest.successRate = ui_success_norm
-        end
-        db.UpdateQuestDetails(questName, current_quest)
-    end
+	elseif (not db_exp_present and db_success_norm == nil and Settings.Debug.processFullQuestRewardData == true) then
+		-- If DB has no record for experience AND no stored successRate, and ingestion is enabled, add the quest
+		if ui_success_norm ~= nil then
+			current_quest.successRate = ui_success_norm
+		end
+		db.UpdateQuestDetails(questName, current_quest)
+	end
 end
 
 	::doneWithThisNode::
