@@ -27,7 +27,7 @@ local function help()
     printf('%s \aoconversionCountCommon <number> \ar: Set agentCountForConversionCommon', overseer_msg)
     printf('%s \aoconversionCountUncommon <number> \ar: Set agentCountForConversionUncommon', overseer_msg)
     printf('%s \aoconversionCountRare <number> \ar: Set agentCountForConversionRare', overseer_msg)
-    printf('%s \aoconversionCountElite <number> \ar: Set agentCountForConversionElite', overseer_msg)
+    printf('%s \aoretireCountElite <number> \ar: Set agentCountForRetireElite', overseer_msg)
     printf('%s \aouseDatabase [on|off] \ar: Toggle loading quests from local DB (Settings.General.useQuestDatabase)', overseer_msg)
     printf('%s \aocampAfterFullCycle [on|off] \ar: Toggle camping after full cycle', overseer_msg)
     printf('%s \aocampAfterFullCycleFastCamp [on|off] \ar: Toggle fast camp behavior', overseer_msg)
@@ -130,8 +130,8 @@ local function set_command(arg, c1)
         Settings.General.agentCountForConversionRare, success = apply_command_number(Settings.General.agentCountForConversionRare, c1)
         if success then log_info("Settings.General.agentCountForConversionRare", Settings.General.agentCountForConversionRare) else log_warn("Invalid parameter for conversionCountRare:", c1) end
     elseif (arg=="conversionCountElite") then
-        Settings.General.agentCountForConversionElite, success = apply_command_number(Settings.General.agentCountForConversionElite, c1)
-        if success then log_info("Settings.General.agentCountForConversionElite", Settings.General.agentCountForConversionElite) else log_warn("Invalid parameter for conversionCountElite:", c1) end
+        Settings.General.agentCountForRetireElite, success = apply_command_number(Settings.General.agentCountForRetireElite, c1)
+        if success then log_info("Settings.General.agentCountForRetireElite", Settings.General.agentCountForRetireElite) else log_warn("Invalid parameter for conversionCountElite:", c1) end
     elseif (arg=="useDatabase") then
         Settings.General.useQuestDatabase, success = apply_command_bool(Settings.General.useQuestDatabase, c1)
         if success then log_info("Settings.General.useQuestDatabase", Settings.General.useQuestDatabase) else log_warn("Invalid parameter for useDatabase:", c1) end
