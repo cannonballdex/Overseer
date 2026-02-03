@@ -490,11 +490,11 @@ function RenderSettingsGeneralTab()
 
         -- Agents Required Before Conversion section as collapsible header
         if ImGui.CollapsingHeader("Agents Required Before Conversion") then
-            Settings.General.convertEliteAgents, changed = uiutils.add_setting_checkbox('Convert Elite Agents',
-                Settings.General.convertEliteAgents,
-                'Specifies number of elite agents to maintain\n\nCommand: convertEliteAgents')
+            Settings.General.retireEliteAgents, changed = uiutils.add_setting_checkbox('Retire Elite Agents',
+                Settings.General.retireEliteAgents,
+                'Specify the number of Elite agents to keep; retiring Elite agents is user-initiated and not automatic.\n\nCommand: retireEliteAgents')
             if (changed) then settings.SaveSettings() end
-            if (Settings.General.convertEliteAgents) then
+            if (Settings.General.retireEliteAgents) then
                 ImGui.Indent(20)
             end
 
@@ -534,12 +534,12 @@ function RenderSettingsGeneralTab()
                     mq.cmdf('/overseermassconvert rare %s', Settings.General.agentCountForConversionRare)
                 end
 
-                if (Settings.General.convertEliteAgents) then
+                if (Settings.General.retireEliteAgents) then
                     ImGui.PushItemWidth(100)
-                    Settings.General.agentCountForConversionElite, changed = ImGui.InputInt("Elite",
-                        Settings.General.agentCountForConversionElite, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
+                    Settings.General.agentCountForRetireElite, changed = ImGui.InputInt("Elite",
+                        Settings.General.agentCountForRetireElite, 1, 100, ImGuiInputTextFlags.EnterReturnsTrue)
                     uiutils.add_tooltip('Specifies number of elite agents to maintain\n\nCommand: conversionCountElite #')
-                    if Settings.General.agentCountForConversionElite < 2 then Settings.General.agentCountForConversionElite = 1 end
+                    if Settings.General.agentCountForRetireElite < 2 then Settings.General.agentCountForRetireElite = 1 end
                     if (changed) then settings.SaveSettings() end
                     ImGui.SameLine()
                     uiutils.add_icon_action_button(icons.MD_TRANSFER_WITHIN_A_STATION, 'Retire Elite Agents##retireElite2', 'RetireEliteAgents','Retire Elite Agents')
@@ -608,6 +608,8 @@ function RenderSettingsGeneralTab()
             end
         end
 
+        ImGui.Separator()
+
         -- UI Actions section as collapsible header (only show inner fields if the section is open)
         if ImGui.CollapsingHeader("UI Actions") then
             if Settings.General.uiActions.useUiActionDelay ~= nil then
@@ -618,32 +620,35 @@ function RenderSettingsGeneralTab()
 
                 if Settings.General.uiActions.useUiActionDelay then
                     ImGui.Indent(20)
+                    ImGui.PushItemWidth(100)
                     Settings.General.uiActions.delayMinMs, changed = ImGui.InputInt("Minimum random delay (ms)",
                         Settings.General.uiActions.delayMinMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
                     uiutils.add_tooltip('Minimum random delay (ms) for most UI actions\n\nCommand: uiDelayMin')
                     if (changed) then settings.SetUiDelays() end
+                    ImGui.PopItemWidth()
+                    ImGui.PushItemWidth(100)
                     Settings.General.uiActions.delayMaxMs, changed = ImGui.InputInt("Maximum random delay (ms)",
                         Settings.General.uiActions.delayMaxMs, 1, 10000, ImGuiInputTextFlags.EnterReturnsTrue)
                     uiutils.add_tooltip('Maximum random delay (ms) for most UI actions\n\nCommand: uiDelayMax')
                     if (changed) then settings.SetUiDelays() end
                     ImGui.Unindent(20)
+                    ImGui.PopItemWidth()
                 end
             end
         end
-        ImGui.Separator()
 
-        -- Logging section as collapsible header
-        if ImGui.CollapsingHeader("Logging") then
-            local logLevel, changed = ImGui.Combo("Log Level", Settings.General.logLevel, log_levels, #log_levels)
-            ImGui.PushItemWidth(100)
-            ImGui.SameLine()
-            ImGui.Text("'%s'", log_levels[Settings.General.logLevel])
-            if (changed) then settings.SetLogLevel(logLevel) end
-        end
         ImGui.Separator()
 
         -- Test Mode / Debug section as collapsible header
-        if ImGui.CollapsingHeader("Test Mode / Debug") then
+        if ImGui.CollapsingHeader("Test Mode / Debug / Logging") then
+             local logLevel
+            ImGui.PushItemWidth(100)
+            logLevel, changed = ImGui.Combo("Log Level", Settings.General.logLevel, log_levels, #log_levels)
+            ImGui.SameLine()
+            ImGui.Text("'%s'", log_levels[Settings.General.logLevel])
+            if (changed) then settings.SetLogLevel(logLevel) end
+            ImGui.PopItemWidth()
+
             local update_val, update_changed = uiutils.add_setting_checkbox('Enter Test Mode',
                 (Settings.Debug and Settings.Debug.allowTestMode) or false,
                 'Adds "Test" tab and enables test mode, add quests to database, update mismatches, and validate rewards.\n\nCommand: allowTestMode')
@@ -788,7 +793,7 @@ local function RenderSettingsQuestsPriorityGroupSection(priorityName, config)
     if (ImGui.BeginTabItem(priorityName)) then
         local changed
         ImGui.PushStyleColor(ImGuiCol.Text, 1.0, 0.6, 0.6, 1)
-        config.general.selectHighestExp, changed = uiutils.add_setting_checkbox('Select highest exp rewards', config.general.selectHighestExp)
+        config.general.selectHighestExp, changed = uiutils.add_setting_checkbox('Select Highest EXP Rewards', config.general.selectHighestExp)
         ImGui.PopStyleColor(1)
         uiutils.add_tooltip('If selected, prioritizes quests purely on raw amount of exp earned.')
         if (changed) then settings.SaveGroupPrioritySettings("general", priorityName) end
@@ -1404,7 +1409,7 @@ function RenderSpecificAgentCountSection(name, showType)
                 ImGui.Text(item)
 
                 ImGui.TableNextColumn()
-                if (is_elite(rarity) and Settings.General.agentCountForConversionElite ~= nil and value.count > Settings.General.agentCountForConversionElite) then
+                if (is_elite(rarity) and Settings.General.agentCountForRetireElite ~= nil and value.count > Settings.General.agentCountForRetireElite) then
                     ImGui.PushStyleColor(ImGuiCol.Text, 0.2, 0.8, 0.2, 1)
                     ImGui.Text(value.count)
                     ImGui.PopStyleColor(1)
