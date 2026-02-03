@@ -117,7 +117,7 @@ local function ensure_perchar_db()
 
   -- If per-character DB has greater-than OR EQUAL rows compared to shared DB, do not overwrite
   if dest_count >= shared_count then
-    logger.info("Database is up to date (%s) has (%d) and main DB (%d) rows.", tostring(dest), dest_count, shared_count)
+    logger.info("Database (%s) has (%d) and main DB (%d) rows.", tostring(dest), dest_count, shared_count)
     return true
   end
 
