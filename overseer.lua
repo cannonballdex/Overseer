@@ -2959,7 +2959,7 @@ function RetireEliteAgent(name)
 end
 
 function RetireEliteAgents()
-    if (Settings.General.convertEliteAgents ~= true or (tonumber(Settings.General.agentCountForConversionElite) or 0) < 1) then
+    if (Settings.General.retireEliteAgents ~= true or (tonumber(Settings.General.agentCountForRetireElite) or 0) < 1) then
         return
     end
 
@@ -2983,7 +2983,7 @@ function RetireEliteAgents()
             table.insert(snapshot, { name = name, count = tonumber(data.count) or 0 })
         end
 
-        local keep = tonumber(Settings.General.agentCountForConversionElite) or 0
+        local keep = tonumber(Settings.General.agentCountForRetireElite) or 0
 
         for _, entry in ipairs(snapshot) do
             local name = entry.name
