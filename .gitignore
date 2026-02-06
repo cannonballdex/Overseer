@@ -4,7 +4,6 @@ data/*
 # Allow these files
 !data/achievement_quests.json
 !data/overseer_agents.json
-!data/quest_ordering.json
 !data/overseer.db
 
 # Block SQLite temp files
