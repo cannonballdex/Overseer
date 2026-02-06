@@ -154,6 +154,7 @@ local args = {...}
 local no_run = args[1] == 'no_run'
 
 -- Initialize database and then the rest of the system
+---@diagnostic disable-next-line: undefined-field
 local initialized = db.Initialize()
 if not initialized then
   logger.error("Database initialization failed. Aborting startup.")
