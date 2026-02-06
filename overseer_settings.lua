@@ -13,8 +13,6 @@ local actions = {}
 local Version = 'Beta 5.0'
 local MyIni = 'Overseer.lua'
 
-local __change_callbacks = {}
-
 -- Settings change callbacks
 local __change_callbacks = {}
 
@@ -535,7 +533,6 @@ local function ensure_ini_defaults()
 					storedExpRewardsCount = 8,
 					claimRewards = false,
 				},
-				useRandomizedUiInteractionDelays = false,
 				useQuestDatabase = true,
 				minimumSuccessPercent = 0,
 				logLevel = 4,
@@ -544,6 +541,7 @@ local function ensure_ini_defaults()
 				ignoreRecoveryQuests = true,
 				countAgentsBetweenCycles = false,
 				maxLevelUseCurrentCap = true,
+				---@diagnostic disable-next-line: undefined-field
 				maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel(),
 				maxLevelPctForClaimingExpReward = 95,
 				claimCollectionFragments = false,
@@ -569,6 +567,7 @@ local function ensure_ini_defaults()
 				}
 			},
 			Display = {
+				autoFitWindow = true,
 				showDetailed = true,
 			},
 			QuestPriority = {
@@ -740,8 +739,6 @@ local function initialize(turn_off_autorun_settings)
 	EnsureIniDefaults_VersionUpdates()
 	-- sync persisted allowTestMode into runtime flag
 	actions.InTestMode = (Settings.Debug and Settings.Debug.allowTestMode) and true or false
-
-	StopOnMaxMercAA = Settings.General.stopOnMaxMercAA
 
 	CountAgentsBetweenCycles = Settings.General.countAgentsBetweenCycles
 
