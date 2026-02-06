@@ -14,6 +14,20 @@ local timers = require('utils.timers')
 local normalize = require('utils.normalize')
 local ui = require('utils.ui')
 local claim_utils = require('utils.claim_utils')
+
+-- Deep copy function to prevent reference issues
+local function deep_copy(orig)
+    if type(orig) ~= 'table' then 
+        return orig 
+    end
+    
+    local copy = {}
+    for k, v in pairs(orig) do
+        copy[k] = deep_copy(v)
+    end
+    return copy
+end
+
 local _db_path_logged = false
 local actions = {}
 
@@ -1461,11 +1475,8 @@ function LoadAvailableQuests(loadExtraData)
 	end
 
 	local questName
-	local fullQuestDetailString
-	local current_quest
-	local NODE = mq.TLO.Window(AvailableQuestList).FirstChild
-	local database_exp_amount = nil
-	local db_saved = nil
+local fullQuestDetailString
+local NODE = mq.TLO.Window(AvailableQuestList).FirstChild
 
 	AvailableQuestCount = 0
 	QuestRunOrder = 0
@@ -1475,6 +1486,9 @@ function LoadAvailableQuests(loadExtraData)
 	end
 
 	::nextNodeX::
+local database_exp_amount = nil
+local db_saved = nil
+local current_quest = nil
 	database_exp_amount = nil
 
 	if should_abort_now() then
@@ -1523,7 +1537,8 @@ end
 		logger.info("[DEBUG] DB returned: %s", current_quest and current_quest.name or "nil")
 		if (current_quest ~= nil) then
 			logger.trace("[TRACE] \agDB: \ayFound quest in DB: %s (exp=%s, type=%s)", tostring(current_quest.name), tostring(current_quest.experience), tostring(current_quest.type))
-			AllAvailableQuests[AvailableQuestCount] = current_quest
+			AllAvailableQuests[AvailableQuestCount] = deep_copy(current_quest)
+			current_quest = AllAvailableQuests[AvailableQuestCount]
 			current_quest.available = true
 			database_exp_amount = current_quest.experience
 
@@ -1546,6 +1561,7 @@ end
 			logger.trace("[TRACE] \arDB: No record for quest\at '%s'", tostring(questName))
 			-- FIX: Initialize empty quest table for new quests
     		AllAvailableQuests[AvailableQuestCount] = {}
+current_quest = AllAvailableQuests[AvailableQuestCount]
 		end
 	end
 

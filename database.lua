@@ -10,6 +10,24 @@ local db_path -- store the filesystem path opened by Initialize()
 local actions = {}
 --local db = {}   -- <- This has to be commented out or it don't konw the correct type.
 
+-- Add at top of database.lua
+local function deep_copy(orig)
+    local orig_type = type(orig)
+    local copy
+    if orig_type == 'table' then
+        copy = {}
+        for orig_key, orig_value in pairs(orig) do
+            copy[orig_key] = deep_copy(orig_value)
+        end
+        setmetatable(copy, deep_copy(getmetatable(orig)))
+    else
+        copy = orig
+    end
+    return copy
+end
+
+
+
 -- Minimal SQL escaping helper to avoid unescaped quotes in interpolated SQL.
 -- This is intentionally small and non-invasive: it doubles single-quotes per
 -- SQLite string literal escaping rules (replace ' with '').
@@ -113,18 +131,20 @@ local overseerquests_upsert =
 "ON CONFLICT(name) DO UPDATE SET level=excluded.level, rarity=excluded.rarity, type=excluded.type, duration=excluded.duration, " ..
 "successRate=excluded.successRate, experience=excluded.experience, mercenaryAas=excluded.mercenaryAas, tetradrachms=excluded.tetradrachms, DateModified=excluded.DateModified;"
 
+-- Update GetQuestDetails
 function actions.GetQuestDetails(questName)
     if not db then
-        logger.error('DB: GetQuestDetails called but DB is not initialized; quest=%s', tostring(questName))
+        logger.warning('DB: GetQuestDetails called but DB is nil; returning nil for %s', tostring(questName))
         return nil
     end
 
-    -- Escape quest name to avoid embedded single-quotes breaking SQL
     local safe_name = sql_escape(questName)
     local sql = string.format("select * from OverseerQuests where name='%s';", safe_name)
     logger.trace('DB: GetQuestDetails: '.. sql)
+    
     for x in db:nrows(sql) do
-        return to_quest_model(x)
+        local quest = to_quest_model(x)
+        return deep_copy(quest)
     end
 
     return nil
