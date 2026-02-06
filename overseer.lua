@@ -1518,7 +1518,9 @@ end
 			_db_path_logged = true
 		end
 
+		logger.info("[DEBUG] Looking up quest: '%s' (length: %d)", questName, #questName)
 		current_quest = db.GetQuestDetails(questName)
+		logger.info("[DEBUG] DB returned: %s", current_quest and current_quest.name or "nil")
 		if (current_quest ~= nil) then
 			logger.trace("[TRACE] \agDB: \ayFound quest in DB: %s (exp=%s, type=%s)", tostring(current_quest.name), tostring(current_quest.experience), tostring(current_quest.type))
 			AllAvailableQuests[AvailableQuestCount] = current_quest
@@ -1542,6 +1544,8 @@ end
 			end
 		else
 			logger.trace("[TRACE] \arDB: No record for quest\at '%s'", tostring(questName))
+			-- FIX: Initialize empty quest table for new quests
+    		AllAvailableQuests[AvailableQuestCount] = {}
 		end
 	end
 
