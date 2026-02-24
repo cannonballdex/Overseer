@@ -7,8 +7,13 @@ local actions = {}
 local app_name = 'Overseer'
 local logLeader = '\ar[\ag'..app_name..'.lua\ar]\aw '
 
---- @type number
-local logLevel = 4
+--- Initialize log level:
+-- If Settings.General.logLevel already exists (saved preference), honor it.
+-- Otherwise default to Trace (6) to trace output during startup.
+local logLevel = 6
+if type(_G.Settings) == 'table' and _G.Settings.General and type(_G.Settings.General.logLevel) == 'number' then
+    logLevel = _G.Settings.General.logLevel
+end
 
 function actions.get_log_level() return logLevel end
 
@@ -19,7 +24,6 @@ function actions.error(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ar %s', logLeader, output)
 end
 
@@ -28,7 +32,6 @@ function actions.warning(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \aw %s', logLeader, output)
 end
 
@@ -37,7 +40,6 @@ function actions.info(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.parse(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ao %s', logLeader, output)
 end
 
@@ -46,7 +48,6 @@ function actions.debug(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.cmd(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ag %s', logLeader, output)
 end
 
@@ -55,7 +56,6 @@ function actions.trace(format, ...)
 		return
 	end
     local output = string.format(format, ...)
-	mq.cmd(string.format('/mqlog [%s] %s', mq.TLO.Me.Name(), output))
 	printf('%s \ay %s', logLeader, output)
 end
 

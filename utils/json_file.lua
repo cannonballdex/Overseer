@@ -1,5 +1,5 @@
-local Json = require("utils/json")
-local ioutil = require('utils/io_utils')
+local Json = require('utils.json')
+local ioutil = require('utils.io_utils')
 
 local json_file = {}
 

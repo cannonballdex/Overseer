@@ -20,6 +20,10 @@
 -- IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 -- CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+-- NOTE: Vendored argparse.lua (v0.7.1) used for CLI-style parsing in this repo.
+-- Provides chainable builders for arguments/options/commands and shell completions.
+-- Keep local edits minimal; prefer upstream updates when possible.
+
 local function deep_update(t1, t2)
    for k, v in pairs(t2) do
       if type(v) == "table" then
@@ -573,15 +577,30 @@ function Command:_get_description()
 end
 
 function Option:_get_usage()
-   local usage = self:_get_argument_list()
-   table.insert(usage, 1, self._name)
-   usage = table.concat(usage, " ")
+    -- Get argument list safely
+    local args = self:_get_argument_list()
+    if type(args) ~= "table" then
+        args = {}
+    end
 
-   if self._mincount == 0 or self._default then
-      usage = "[" .. usage .. "]"
-   end
+    -- Ensure name is a string
+    local name = tostring(self._name or "")
 
-   return usage
+    -- Insert the option name at the front and build the text
+    table.insert(args, 1, name)
+    local usage = table.concat(args, " ")
+
+    -- Normalize mincount (treat non-numeric as 0)
+    local mincount = tonumber(self._mincount) or 0
+
+    -- Treat presence of a default (even `false`) as meaning the argument is optional
+    local has_default = (self._default ~= nil)
+
+    if mincount == 0 or has_default then
+        usage = "[" .. usage .. "]"
+    end
+
+    return usage
 end
 
 function Argument:_get_default_target()
@@ -1899,10 +1918,21 @@ function ParseState:check_mutexes(element_state)
 end
 
 function ParseState:invoke(option, name)
+   io.stderr:write(("DEBUG invoke: option=%s name=%s\n"):format(tostring(option), tostring(name)))
+   if option then
+      io.stderr:write(("  metatable=%s\n"):format(tostring(getmetatable(option))))
+      local fn = option.set_name
+      io.stderr:write(("  set_name type=%s\n"):format(tostring(type(fn))))
+      if type(fn) == 'function' then
+         local info = debug.getinfo(fn)
+         io.stderr:write(("  set_name defined at: %s:%s\n"):format(tostring(info.short_src), tostring(info.linedefined)))
+      end
+      io.stderr:write(debug.traceback("", 2) .. "\n")
+   end
+
    self:close()
    option:set_name(name)
-   self:check_mutexes(option, name)
-
+   self:check_mutexes(option)
    if option:invoke() then
       self.option = option
    end

@@ -1,6 +1,6 @@
---- @type Mq
+-- mq utils / action helpers for Overseer (keeps existing actions, adds safe_call and delay)
 local mq = require('mq')
-local logger = require('utils/logger')
+local logger = require('utils.logger')
 
 local actions = {}
 local useDelay = false
@@ -13,6 +13,42 @@ local function Delay()
 	local randomMs = delayMinMs + math.random() * (delayMaxMs - delayMinMs)
 
 	mq.delay(randomMs)
+end
+
+-- safe_call(fn, ...) -> calls fn(...) under pcall, returns result or nil on error
+function actions.safe_call(fn, ...)
+	if type(fn) ~= 'function' then return nil end
+	local ok, res = pcall(fn, ...)
+	if not ok then
+		if logger and logger.trace then logger.trace('[mq_utils] safe_call error: %s', tostring(res)) end
+		return nil
+	end
+	return res
+end
+
+-- delay(timeout_ms, predicate) -> uses mq.delay if available, otherwise polls predicate
+function actions.delay(timeout_ms, predicate)
+	timeout_ms = timeout_ms or 2000
+	if type(predicate) ~= 'function' then return false end
+
+	-- Prefer mq.delay (keeps MQ events running)
+	if mq and mq.delay then
+		local ok, res = pcall(function() return mq.delay(timeout_ms, predicate) end)
+		if ok then return res end
+	end
+
+	-- Fallback polling
+	local start = os.clock()
+	local timeout_s = timeout_ms / 1000
+	while (os.clock() - start) < timeout_s do
+		local ok, res = pcall(predicate)
+		if ok and res then return true end
+		if mq and mq.doevents then pcall(mq.doevents) end
+		-- short sleep
+		local t0 = os.clock()
+		while os.clock() - t0 < 0.05 do end
+	end
+	return false
 end
 
 function actions.InspectItem(itemName)

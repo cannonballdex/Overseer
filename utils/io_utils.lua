@@ -41,7 +41,7 @@ function actions.ensure_config_dir()
 end
 
 function actions.get_lua_dir()
-    return string.format('%s\\overseer', mq.luaDir):gsub('\\', '/'):lower()
+    return string.format('%s\\\\overseer', mq.luaDir):gsub('\\\\', '/'):lower()
 end
 
 function actions.get_lua_file_path(filename)
@@ -49,19 +49,19 @@ function actions.get_lua_file_path(filename)
 end
 
 function actions.get_config_dir()
-    return string.format('%s\\overseer', mq.configDir):gsub('\\', '/'):lower()
+    return string.format('%s\\\\overseer', mq.configDir):gsub('\\\\', '/'):lower()
 end
 
 function actions.get_config_file_path(filename)
-    return string.format('%s\\%s', actions.get_config_dir(), filename)
+    return string.format('%s\\\\%s', actions.get_config_dir(), filename)
 end
 
 function actions.get_root_config_dir()
-    return string.format('%s', mq.configDir):gsub('\\', '/'):lower()
+    return string.format('%s', mq.configDir):gsub('\\\\', '/'):lower()
 end
 
 function actions.get_root_config_file_path(filename)
-    return string.format('%s\\%s', actions.get_root_config_dir(), filename)
+    return string.format('%s\\\\%s', actions.get_root_config_dir(), filename)
 end
 
 return actions

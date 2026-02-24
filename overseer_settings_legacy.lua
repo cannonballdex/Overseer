@@ -164,7 +164,7 @@ function EnsureIniDefaults_VersionUpdates()
 	EnsureExists('General', 'autoRestartEachCycle', false)
 	EnsureExists('General', 'runFullCycleOnStartup', false)
 	EnsureExists('General', 'pauseOnCharacterChange', false)
-	EnsureExists('General', 'convertEliteAgents', false)
+	EnsureExists('General', 'retireEliteAgents', false)
 	EnsureExists('General', 'ForceCompletedAchievementQuests', false)
 
 	EnsureExists('General', 'claimEliteAgentEchos', false)
@@ -175,7 +175,7 @@ function EnsureIniDefaults_VersionUpdates()
 	Settings.QuestPriorities = nil
 	Settings.General.useLegacyAgentSelection = nil
 	Settings.Rewards.eliteAgentEchoReward = ensure_string(Settings.Rewards.eliteAgentEchoReward, 'None')
-	EnsureExists('General', 'agentCountForConversionElite', 99)
+	EnsureExists('General', 'agentCountForRetireElite', 99)
 	Settings.General.countAgentsBetweenCycles = nil
 	Settings.General.minimumQuestExperience = nil
 
@@ -209,11 +209,12 @@ function EnsureIniDefaults_VersionUpdates()
 
 	EnsureExists('General', 'campAfterFullCycle', false)
 	EnsureExists('General', 'campAfterFullCycleFastCamp', false)
-	if (Settings.General.useQuestDatabase ~= true) then Settings.General.useQuestDatabase = true end
+	
 
-	-- These shouldn't be persisted, and shouldn't be used by "normies"
-	Settings.Debug.processFullQuestRewardData = false
-	Settings.Debug.validateQuestRewardData = false
+	-- These shouldn't be persisted, and shouldn't be used by "normies" But were not normies.
+	--Settings.Debug.processFullQuestRewardData = false
+	--Settings.Debug.validateQuestRewardData = false
+	--if (Settings.General.useQuestDatabase ~= true) then Settings.General.useQuestDatabase = true end
 
 	if (Settings.General.version == nil or Settings.General.version >= actions.SettingsVersion) then
 		return

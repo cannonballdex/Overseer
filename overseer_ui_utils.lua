@@ -1,4 +1,4 @@
-local overseer = require('overseer.overseer')
+local overseer = require('overseer')
 
 local actions = {}
 
@@ -24,7 +24,7 @@ function actions.text_colored(style, text)
     elseif (style == TextStyle.TableColHeader) then
         ImGui.TextColored(0.690, 0.553, 0.259, 1, text)
     elseif (style == TextStyle.SubSectionTitle) then
-        ImGui.TextColored(0.47, 0.56, 0.61, 1, text)
+        ImGui.TextColored(0, 0.5, 1, 1, text)
     elseif (style == TextStyle.SubSectionTitleCallout) then
         ImGui.TextColored(1, 0.5, 1, 1, text)
     elseif (style == TextStyle.ProcessName) then

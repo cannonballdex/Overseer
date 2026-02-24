@@ -10,8 +10,15 @@ require('utils.persistence')
 
 local actions = {}
 
-local Version = '3.78'
+local Version = 'Beta 5.0'
 local MyIni = 'Overseer.lua'
+
+-- Settings change callbacks
+local __change_callbacks = {}
+
+function RegisterSettingsChangeCallback(fn)
+    if type(fn) == 'function' then table.insert(__change_callbacks, fn) end
+end
 
 actions.InTestMode = false
 
@@ -37,6 +44,9 @@ SettingsTemp = {}
 
 function actions.SaveSettings()
 	persistence.store(MyIniPath, Settings)
+	for _, cb in ipairs(__change_callbacks) do
+		pcall(cb) -- protect callback errors from breaking SaveSettings
+	end
 end
 
 function ReorderCollectionUp(collection, index)
@@ -208,11 +218,6 @@ end
 
 local function save_quest_priority_rarities(old, new)
 	if (not old or not new) then return end
-
-	-- if (new.rarities.elite and new.rarities.rare and new.rarities.uncommon and new.rarities.common and new.rarities.easy) then
-	-- 	old.Rarities = "Any"
-	-- 	return
-	-- end
 
 	local isFirst = true
 	old.Rarities = ""
@@ -528,15 +533,15 @@ local function ensure_ini_defaults()
 					storedExpRewardsCount = 8,
 					claimRewards = false,
 				},
-				useRandomizedUiInteractionDelays = false,
 				useQuestDatabase = true,
 				minimumSuccessPercent = 0,
-				logLevel = 1,
+				logLevel = 4,
 				ignoreConversionQuests = false,
 				ignoreRecruitmentQuests = false,
 				ignoreRecoveryQuests = true,
 				countAgentsBetweenCycles = false,
 				maxLevelUseCurrentCap = true,
+				---@diagnostic disable-next-line: undefined-field
 				maxLevelForClaimingExpReward = mq.TLO.Me.MaxLevel(),
 				maxLevelPctForClaimingExpReward = 95,
 				claimCollectionFragments = false,
@@ -546,13 +551,14 @@ local function ensure_ini_defaults()
 				agentCountForConversionCommon = 2,
 				agentCountForConversionUncommon = 2,
 				agentCountForConversionRare = 2,
+				agentCountForRetireElite = 99,
 				showUi = true,
 				autoRestartEachCycle = false,
 				runFullCycleOnStartup = false,
 				campAfterFullCycle = false,
 				campAfterFullCycleFastCamp = false,
 				pauseOnCharacterChange = false,
-				convertEliteAgents = false,
+				retireEliteAgents = false,
 				ForceCompletedAchievementQuests = false,
 				uiActions = {
 					useDelay = false,
@@ -561,11 +567,12 @@ local function ensure_ini_defaults()
 				}
 			},
 			Display = {
+				autoFitWindow = true,
 				showDetailed = true,
 			},
 			QuestPriority = {
 				Priorities = 'Levels|Durations|Rarities|Types',
-				Durations = '3h|6h|12h',
+				Durations = '6h|12h',
 				Rarities = 'Elite|Rare|Uncommon|Common|Easy',
 				Types = actions.AllQuestTypes,
 				Levels = '5|4|3|2|1',
@@ -730,15 +737,19 @@ local function initialize(turn_off_autorun_settings)
 	logger.warning('v. \at%s\ax   Configuration: \at%s\ax', Version, MyIni)
 
 	EnsureIniDefaults_VersionUpdates()
-
-	StopOnMaxMercAA = Settings.General.stopOnMaxMercAA
+	-- sync persisted allowTestMode into runtime flag
+	actions.InTestMode = (Settings.Debug and Settings.Debug.allowTestMode) and true or false
 
 	CountAgentsBetweenCycles = Settings.General.countAgentsBetweenCycles
 
 	DebugNoRunQuestMode = Settings.Debug.doNotRunQuests
 	DebugNoSelectAgents = Settings.Debug.doNotFindAgents
 	mqutils.set_delays(Settings.General.uiActions.useUiActionDelay, Settings.General.uiActions.delayMinMs, Settings.General.uiActions.delayMaxMs)
-
+	Settings.Debug = Settings.Debug or {}
+	Settings.Debug.processFullQuestRewardData = Settings.Debug.processFullQuestRewardData or false
+	Settings.Debug.validateQuestRewardData = Settings.Debug.validateQuestRewardData or false
+	-- NEW: allow updates on validation mismatches when true (default: false)
+	Settings.Debug.updateQuestDatabaseOnValidate = Settings.Debug.updateQuestDatabaseOnValidate or false
 	load_achievement_quests()
 	load_settings_temp()
 
