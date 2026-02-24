@@ -1,0 +1,11 @@
+# Ignore everything in data folder
+data/*
+
+# Allow these files
+!data/achievement_quests.json
+!data/overseer_agents.json
+!data/overseer.db
+
+# Block SQLite temp files
+*.db-shm
+*.db-wal
